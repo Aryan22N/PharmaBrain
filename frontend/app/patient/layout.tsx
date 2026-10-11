@@ -6,7 +6,6 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   Activity,
   User,
-  Stethoscope,
   LayoutDashboard,
   Clock,
   TrendingUp,
@@ -14,24 +13,16 @@ import {
   FileText,
   AlertCircle,
   FileCheck,
-  Share2,
-  Database,
-  RotateCcw,
   LogOut,
-  Upload,
-  Loader2,
   CheckCircle2,
-  AlertTriangle,
   ShieldCheck,
-  Heart,
-  Sparkles,
   X,
 } from "lucide-react";
 import { PatientDashboardProvider, usePatientDashboard } from "./context";
 import { PatientModals } from "@/components/patient/PatientModals";
 
 function Sidebar() {
-  const { userData, documents, timelineEvents, recordedMedicines, refresh } = usePatientDashboard();
+  const { userData, documents, timelineEvents, recordedMedicines } = usePatientDashboard();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -41,7 +32,7 @@ function Sidebar() {
   const legacyPatientCode = userData?.legacyPatientId ?? null;
   const userEmail = userData?.email ?? "";
 
-  const activeMedsCount = recordedMedicines.filter((m: any) => m.status === "ACTIVE").length;
+  const activeMedsCount = recordedMedicines.filter((m: { status?: string }) => m.status === "ACTIVE").length;
 
   const navItems = [
     { name: "Overview", href: "/patient/overview", icon: LayoutDashboard },
@@ -56,16 +47,12 @@ function Sidebar() {
       name: "Medical Timeline",
       href: "/patient/timeline",
       icon: Clock,
-      badge: timelineEvents.some((e: any) => e.is_conflicting) ? "1 conflict" : undefined,
+      badge: timelineEvents.some((e: { is_conflicting?: boolean }) => Boolean(e.is_conflicting)) ? "1 conflict" : undefined,
     },
     { name: "Health Trends", href: "/patient/trends", icon: TrendingUp },
-    {
-      name: "Medicines",
-      href: "/patient/medicines",
-      icon: Pill,
-      badge: `${activeMedsCount} active`,
-    },
+    { name: "Medicines", href: "/patient/medicines", icon: Pill, badge: `${activeMedsCount} active` },
     { name: "Symptoms & Side Effects", href: "/patient/symptoms", icon: AlertCircle },
+    { name: "Doctor Access & Consent", href: "/patient/sharing", icon: ShieldCheck },
   ];
 
   const handleLogout = async () => {
@@ -151,10 +138,8 @@ function Sidebar() {
 }
 
 function TopHeader() {
-  const { userData } = usePatientDashboard();
   const router = useRouter();
   const [portalMode, setPortalMode] = useState<"patient" | "doctor">("patient");
-  const patientCode = userData?.patientId ?? userData?.patientCode ?? "";
 
   const handleLogout = async () => {
     try {
@@ -208,11 +193,7 @@ function TopHeader() {
 }
 
 function PatientLayoutContent({ children }: { children: React.ReactNode }) {
-  const { userData, notification, setNotification } = usePatientDashboard();
-
-  const userName = userData?.name ?? "Patient";
-  const patientCode = userData?.patientId ?? userData?.patientCode ?? "";
-  const legacyPatientCode = userData?.legacyPatientId ?? null;
+  const { notification, setNotification } = usePatientDashboard();
 
   return (
     <div className="min-h-screen bg-[#f4f7f6] text-slate-800 font-sans flex flex-col">

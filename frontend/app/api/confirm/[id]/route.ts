@@ -33,7 +33,7 @@ export async function POST(
       const { cookies } = await import("next/headers");
       const { verifyToken } = await import("@/lib/auth");
 
-      let userId = 1;
+      let userId: number | null = null;
       let patientId: string | null = null;
       try {
         const cookieStore = await cookies();
@@ -50,6 +50,10 @@ export async function POST(
           if (payload?.patientId) patientId = payload.patientId;
         }
       } catch (authErr) {}
+
+      if (!userId) {
+        return NextResponse.json({ error: "Authentication required to confirm prescription" }, { status: 401 });
+      }
 
       const rec = body.record || {};
       const docName = `${rec.hospital || "Prescription"} - ${rec.date_iso || new Date().toISOString().slice(0, 10)}`;

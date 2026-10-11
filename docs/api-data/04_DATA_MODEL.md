@@ -82,6 +82,15 @@ erDiagram
         varchar email
         varchar passwordHash
         varchar createdAt
+        varchar role
+        varchar doctorId
+        varchar doctorVerificationStatus
+        varchar medicalLicenseNumber
+        varchar specialization
+        varchar hospitalAffiliation
+        text doctorVerificationNote
+        varchar doctorVerifiedAt
+        varchar doctorVerifiedBy
     }
     Document {
         int id PK
@@ -282,7 +291,7 @@ Managed by `frontend/lib/db.ts` and API endpoints.
 
 | Table | Purpose |
 |---|---|
-| `"User"` | Patient accounts: `id`, `patientId` (9-digit), `legacyPatientId`, `name`, `email`, `passwordHash`, `createdAt` |
+| `"User"` | User accounts (Patients & Doctors): `id`, `patientId` (prefixed `P-` or 9-digit), `legacyPatientId`, `name`, `email`, `passwordHash`, `createdAt`, `role` (`PATIENT` \| `DOCTOR`), `doctorId` (`D-` prefix), `doctorVerificationStatus` (`NOT_REQUIRED` \| `PENDING` \| `APPROVED` \| `REJECTED`), `medicalLicenseNumber`, `specialization`, `hospitalAffiliation`, `doctorVerificationNote`, `doctorVerifiedAt`, `doctorVerifiedBy` |
 | `"Document"` | Uploaded prescription records: `id`, `userId`, `patientId`, `originalName`, `storedFilename` (stores public Supabase Storage CDN URL or local fallback path), `documentType` (`PRESCRIPTION`), `mimeType`, `filePath` (`/extractions/<id>`), `status` (`NOT CONFIRMED` \| `CONFIRMED` \| `DISCARDED`), `uploadedAt` |
 | `"Analysis"` | Structured analysis linked to document: `id`, `documentId`, `summary`, `structuredResult` (JSONB containing full extraction record and `image_url`), `isDemo`, `createdAt` |
 | `patient_onboarding` | Patient baseline health context: `id`, `user_id`, `patient_id`, `basic_info` (JSONB), `conditions` (JSONB), `custom_conditions` (JSONB), `history` (JSONB), `is_completed`, `created_at`, `updated_at` |
@@ -357,6 +366,31 @@ The Python service calls `md_.create_all(engine)` at startup — tables are crea
 
 ---
 
+## Patient Access Requests Table (Consent & Access Control)
+
+Table: `patient_access_requests` (snake_case, managed in Supabase PostgreSQL).  
+Tracks doctor-to-patient consent requests, approvals, rejections, and revocations.
+
+| Column | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `SERIAL PRIMARY KEY` | No | Unique access request ID |
+| `doctor_id` | `INTEGER REFERENCES "User"(id)` | No | User ID of the requesting doctor |
+| `doctor_code` | `VARCHAR(32)` | No | Persistent doctor identifier (`D-...`) |
+| `doctor_name` | `VARCHAR(255)` | No | Full name of the doctor |
+| `doctor_specialization` | `VARCHAR(120)` | Yes | Doctor's specialty |
+| `doctor_hospital` | `VARCHAR(255)` | Yes | Doctor's hospital affiliation |
+| `patient_id` | `INTEGER REFERENCES "User"(id)` | No | User ID of the target patient |
+| `patient_code` | `VARCHAR(32)` | No | Persistent patient identifier (`P-...`) |
+| `patient_name` | `VARCHAR(255)` | No | Full name of the patient |
+| `status` | `VARCHAR(32)` | No | Request status: `PENDING`, `APPROVED`, `REJECTED`, `REVOKED` |
+| `reason` | `TEXT` | Yes | Clinical consultation note or request reason |
+| `requested_at` | `VARCHAR(64)` | Yes | ISO timestamp when request was initiated |
+| `responded_at` | `VARCHAR(64)` | Yes | ISO timestamp when patient approved or rejected |
+| `revoked_at` | `VARCHAR(64)` | Yes | ISO timestamp when patient revoked access |
+| `expires_at` | `VARCHAR(64)` | Yes | Optional authorization expiration timestamp |
+
+---
+
 ## PLANNED — Future Tables
 
 | Table | Purpose | Status |
@@ -365,3 +399,4 @@ The Python service calls `md_.create_all(engine)` at startup — tables are crea
 | `ingredients` | Active salt mapping: `drug_id`, `salt_name`, `atc_code`, `strength_text` | PLANNED |
 | `medicine_aliases` | OCR error aliases, brand variants | PLANNED |
 | `medicine_ingredients` | Many-to-many: `medicine_id`, `ingredient_id`, `strength_mg` | PLANNED |
+

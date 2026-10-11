@@ -1,32 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { verifyToken } from "@/lib/auth";
+import { requirePatientSession } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
+    const { user, payload } = authResult;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const patientId = payload.patientId || "483027156";
+    const patientId = user.patientId || payload.patientId || "483027156";
     const patientIds = [patientId, "CCM12578"].filter(Boolean);
 
     // 1. Fetch User's Documents from patient summary
@@ -127,25 +114,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
+    const { user, payload } = authResult;
 
     const body = await req.json().catch(() => ({}));
     const {
