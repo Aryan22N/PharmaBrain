@@ -385,7 +385,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | `/api/patients/[id]/prescriptions` | GET | `GET /patients/{id}/prescriptions` | Fetches confirmed prescriptions for patient |
 | `/api/patients/[id]/observations` | GET | `GET /patients/{id}/observations` | Fetches vital observations time-series |
 | `/api/patient/trends` | GET | `POST /patients/{patient_id}/trends_summary` | Evaluates longitudinal statistical trends (AHA/ACC BP, ADA glucose), deltas, and Gemini AI patient narrative |
-| `/api/patient/medicines` | GET, POST | — | Longitudinal medication lifecycle management. GET returns `{ current, history, needsReview, all, stats }` with resolved high-res prescription scan URLs. POST creates new manual course. |
+| `/api/patient/medicines` | GET, POST | — | Longitudinal medication lifecycle management. GET synchronizes and returns only medication records belonging to the authenticated patient’s canonical or legacy patient ID (and that patient’s user ID), with resolved high-res prescription scan URLs. POST creates a manual course for the authenticated patient. |
 | `/api/patient/medicines/[id]` | PATCH, PUT | — | PATCH transitions lifecycle status (`COMPLETED`, `ON_HOLD`, `DISCONTINUED`, `ACTIVE`) with mandatory clinical reason. PUT resolves review conflicts. Writes audit log. |
 | `/uploads/[...slug]` | GET | — | Dynamic high-res image serving route for prescription scans; checks `/public/uploads/` with transparent fallback to `/sample_prescription.png`. |
 | `/api/health` | GET | `GET /health` | Health check proxy |
@@ -400,7 +400,24 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 ### Medication Lifecycle Endpoints
 
 #### `GET /api/patient/medicines`
-Aggregates all medications from confirmed prescriptions and `patient_medications`, executes the generalized reconciliation engine, and returns partitioned courses:
+Aggregates medications for the authenticated patient, executes the generalized reconciliation engine, and returns partitioned courses:
+- **Authentication**: Requires `Authorization: Bearer <token>` header or valid `auth_token` HTTP cookie. Guarded by `requirePatientSession(req)`.
+- **Tenant Isolation**: Strictly queries patient records via `getPatientIds(user)` (`[user.patientId, user.legacyPatientId]`). Never queries other patients or hardcoded demo IDs.
+- **Empty Zero-State Response** (Fresh patient account with 0 confirmed prescriptions):
+  ```json
+  {
+    "success": true,
+    "medications": [],
+    "current": [],
+    "history": [],
+    "needsReview": [],
+    "counts": { "total": 0, "active": 0, "history": 0, "needsReview": 0, "conflicts": 0 },
+    "activeCount": 0,
+    "historicalCount": 0,
+    "conflictsCount": 0,
+    "filterOptions": { "doctors": [], "indications": [], "statuses": ["ACTIVE", "COMPLETED", "DISCONTINUED", "ON_HOLD", "NEEDS_REVIEW"] }
+  }
+  ```
 - **`current`**: Medications currently ongoing (`ACTIVE`, `ON_HOLD`).
 - **`history`**: Terminated regimens (`COMPLETED`, `DISCONTINUED`).
 - **`needsReview`**: Regimens requiring clinical attention (`NEEDS_REVIEW`, conflicting instructions, or changed strength).

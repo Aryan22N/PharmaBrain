@@ -8,6 +8,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-11 — Multi-Tenant Patient Medication Isolation & Zero-State Fix:
+  - **Issue Resolved**: Newly registered and logged-in patient accounts navigating to `/patient/medicines` were incorrectly displaying all medications (29+ entries) in the database even without uploading or confirming any prescriptions.
+  - **Root Causes**:
+    1. `frontend/app/api/patient/medicines/route.ts` hardcoded an array of demo patient IDs (`CCM12578`, `demo-patient-1`, `713590440`, `545590541`, `443213338`, `960183477`) in the lookup query, returning demo medications across every user session.
+    2. Over-permissive database query `WHERE patient_id = ANY($1::text[]) OR user_id = $2;` allowed cross-patient record leakage when `user_id` or `patient_id` matched loosely.
+    3. Fallback logic in `frontend/app/api/confirm/[id]/route.ts`, `frontend/app/upload/page.tsx`, and `frontend/app/api/patient/timeline/route.ts` defaulted empty patient IDs to `"483027156"` (Rahul Sharma).
+    4. Next.js was running in standalone production mode inside Docker container `prescription-intelligence-web` without volume mounting, causing stale compiled artifacts to be served until rebuilt.
+  - **Fixes Applied**:
+    - Created `frontend/lib/patientScope.ts` (`getPatientIds(user)`, `getPrimaryPatientId(user)`) strictly isolating queries to the authenticated user's canonical `P-...` and legacy patient IDs.
+    - Scoped SQL queries in `GET/POST /api/patient/medicines`, `PATCH/PUT /api/patient/medicines/[id]`, and `/api/user/dashboard` to `WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2);`.
+    - Removed hardcoded fallback `"483027156"` from `/api/confirm/[id]` and `/upload/page.tsx`, deriving verified IDs directly from the database `"User"` record.
+    - Updated `frontend/lib/api.ts` to automatically attach client-side `Authorization: Bearer ${token}` headers on all requests.
+    - Rebuilt frontend Docker container (`docker-compose build frontend` && `docker-compose up -d --no-deps frontend`), verifying that fresh patient accounts see 0 medications and clean empty states until their first prescription is confirmed.
 - 2026-10-11 — Secure Doctor-to-Patient Access Control, Consent Workflow & Clinical Dossier:
   - Database Schema & Migration: Applied `scratch/migrations/002_patient_access_requests.sql` creating table `patient_access_requests` with status lifecycle (`PENDING`, `APPROVED`, `REJECTED`, `REVOKED`), timestamps (`requested_at`, `responded_at`, `revoked_at`), and composite lookup indexes.
   - Doctor Access Request APIs: Implemented `POST /api/doctor/access-requests` to request access to patients using `P-...` IDs, and `GET /api/doctor/access-requests` to view request history and authorization status.

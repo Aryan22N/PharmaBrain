@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { verifyToken } from "@/lib/auth";
 import { requirePatientSession } from "@/lib/serverAuth";
+import { getPatientIds, getPrimaryPatientId } from "@/lib/patientScope";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,17 @@ export async function GET(req: NextRequest) {
     }
     const { user, payload } = authResult;
 
-    const patientId = user.patientId || payload.patientId || "483027156";
-    const patientIds = [patientId, "CCM12578"].filter(Boolean);
+    const patientIds = getPatientIds(user);
+    const patientId = getPrimaryPatientId(user);
+    if (!patientId || patientIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        events: [],
+        timelineEvents: [],
+        total: 0,
+        conflictsCount: 0,
+      });
+    }
 
     // 1. Fetch User's Documents from patient summary
     const documents = await query(
@@ -77,7 +87,7 @@ export async function GET(req: NextRequest) {
                 source, reliability, verification_status, facility, doctor, reference_id,
                 is_conflicting, conflict_details, created_at
          FROM patient_timeline_events
-         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
          ORDER BY event_date DESC, id DESC;`,
         [patientIds, payload.userId]
       );
@@ -143,7 +153,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const patientId = payload.patientId || "483027156";
+    const patientId = getPrimaryPatientId(user) || payload.patientId || `P-${payload.userId}`;
     const refId = reference_id || `PATIENT-${category.toUpperCase().replace(/\s+/g, "_")}-${Date.now().toString().slice(-6)}`;
     const docName = doctor || `${payload.name || "Patient"} (Self-Report)`;
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
 import { requirePatientSession } from "@/lib/serverAuth";
+import { getPatientIds } from "@/lib/patientScope";
 import {
   MedicationLifecycleStatus,
   validateStatusTransition,
@@ -30,10 +30,13 @@ export async function PATCH(
     }
     const { user, payload } = authResult;
 
-    const patientId = user.patientId || payload.patientId || "483027156";
-    const patientIds = Array.from(
-      new Set([patientId, "CCM12578", "demo-patient-1", "713590440", "545590541", "443213338", "960183477"].filter(Boolean))
-    );
+    const patientIds = getPatientIds(user);
+    if (patientIds.length === 0) {
+      return NextResponse.json(
+        { error: "Patient identity is not configured for this account" },
+        { status: 403 }
+      );
+    }
 
     // Fetch existing medication record
     const existingRows = await query(
@@ -47,7 +50,8 @@ export async function PATCH(
 
     const existing = existingRows[0];
 
-    // Security Check: Verify patient ownership
+    // Security Check: Verify patient ownership against only this account's
+    // canonical and legacy patient identifiers.
     const isOwner =
       existing.user_id === payload.userId ||
       patientIds.includes(existing.patient_id);
@@ -209,10 +213,13 @@ export async function DELETE(
     }
     const { user, payload } = authResult;
 
-    const patientId = user.patientId || payload.patientId || "483027156";
-    const patientIds = Array.from(
-      new Set([patientId, "CCM12578", "demo-patient-1", "713590440", "545590541", "443213338", "960183477"].filter(Boolean))
-    );
+    const patientIds = getPatientIds(user);
+    if (patientIds.length === 0) {
+      return NextResponse.json(
+        { error: "Patient identity is not configured for this account" },
+        { status: 403 }
+      );
+    }
 
     const existingRows = await query(
       `SELECT * FROM patient_medications WHERE id = $1;`,
@@ -224,6 +231,7 @@ export async function DELETE(
     }
 
     const existing = existingRows[0];
+
     const isOwner =
       existing.user_id === payload.userId ||
       patientIds.includes(existing.patient_id);
@@ -234,7 +242,6 @@ export async function DELETE(
         { status: 403 }
       );
     }
-
     // Set to DISCONTINUED with audit log instead of destroying clinical history
     const todayStr = new Date().toISOString().split("T")[0];
     await query(

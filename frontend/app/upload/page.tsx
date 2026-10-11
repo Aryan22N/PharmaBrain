@@ -153,7 +153,7 @@ export default function UploadPage() {
     try {
       const result = await clientApi.uploadPrescription(
         selectedFile,
-        patientId.trim() || "483027156",
+        patientId.trim() || undefined,
         patientName.trim() || undefined
       );
 

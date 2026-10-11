@@ -17,6 +17,7 @@ It resolves the fundamental clinical problem of fragmented prescription snapshot
 7. [Frontend Dashboard Experience (`/patient/medicines`)](#7-frontend-dashboard-experience-patientmedicines)
 8. [Automated Verification & Test Evidence](#8-automated-verification--test-evidence)
 9. [Original Prescription Image Inspection (`inspectModal`)](#9-original-prescription-image-inspection-inspectmodal)
+10. [Multi-Tenant Data Scoping & Zero-State Handling](#10-multi-tenant-data-scoping--zero-state-handling)
 
 ---
 
@@ -419,3 +420,34 @@ When a patient or clinician clicks **"Inspect Prescription"** on any medication 
 3. **Clinical Metadata Anchor:**
    - Displays reference signature (e.g. `CP-RX-3`), attending clinician (e.g. `Dr. Savita P. Murkey`), clinical encounter date (`2026-09-19`), system upload timestamp, and verification status (`Confirmed Prescription`).
    - Links the specific medication, strength, frequency, and indication directly to that prescription.
+
+---
+
+## 10. Multi-Tenant Data Scoping & Zero-State Handling
+
+A critical security and privacy requirement of the platform is strict patient data isolation:
+- **Zero Cross-Contamination:** A newly registered patient account must never see medications, prescriptions, or documents belonging to other patients or demo records.
+- **Clean Empty State:** When a fresh patient logs in without having uploaded or confirmed any prescriptions, `/patient/medicines` returns `counts.total = 0`, empty category arrays, and displays the "No active medications recorded" zero state.
+
+### Identified Issue & Root Cause
+Prior to the fix on 2026-10-11:
+1. `GET /api/patient/medicines` hardcoded a list of legacy and demo patient IDs (`CCM12578`, `demo-patient-1`, `713590440`, `545590541`, `443213338`, `960183477`).
+2. Every patient request was pulling all demo medications into the active view.
+3. Fallback logic in prescription confirmation (`/api/confirm/[id]`) and upload defaulted missing patient IDs to `"483027156"` (Rahul Sharma).
+4. Containerized Next.js in production standalone mode (`server.js`) required a Docker rebuild to deploy the host updates.
+
+### Architectural Fix
+1. **Centralized Patient Scoping (`frontend/lib/patientScope.ts`):**
+   - Implemented `getPatientIds(user)` which returns **only** `[user.patientId, user.legacyPatientId].filter(Boolean)`.
+   - Removed all hardcoded demo patient IDs.
+2. **Strict SQL Query Filtering:**
+   - Updated queries across `medicines`, `dashboard`, and `timeline`:
+     ```sql
+     WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
+     ```
+   - Prevents mismatched patient records from leaking across accounts.
+3. **Derived Identity on Confirm & Upload:**
+   - Removed `"483027156"` fallback. If `patientId` is omitted, the server resolves the authentic patient ID from the database `"User"` record via `userId`.
+   - Updated `clientApi` in `frontend/lib/api.ts` to automatically forward `Authorization: Bearer ${token}` headers on all client-side fetch calls.
+4. **Container Rebuild:**
+   - Run `docker-compose build frontend && docker-compose up -d --no-deps frontend` to reflect standalone Next.js changes in production.

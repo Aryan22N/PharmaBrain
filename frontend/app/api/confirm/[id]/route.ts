@@ -55,6 +55,15 @@ export async function POST(
         return NextResponse.json({ error: "Authentication required to confirm prescription" }, { status: 401 });
       }
 
+      if (!patientId) {
+        const uRows = await query(`SELECT "patientId" FROM "User" WHERE id = $1;`, [userId]);
+        if (uRows.length > 0 && uRows[0].patientId) {
+          patientId = uRows[0].patientId;
+        } else {
+          patientId = `P-${userId}`;
+        }
+      }
+
       const rec = body.record || {};
       const docName = `${rec.hospital || "Prescription"} - ${rec.date_iso || new Date().toISOString().slice(0, 10)}`;
       const medSummary = (rec.medicines || [])
@@ -126,7 +135,7 @@ export async function POST(
             is_conflicting, conflict_details
           ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Hospital HMS', 'High', 'Hospital Verified', $6, $7, $8, false, null);`,
           [
-            patientId || "483027156",
+            patientId,
             userId,
             eventDate,
             `Prescription Verified: ${medSummary || "Clinical Rx"}`,
@@ -150,11 +159,11 @@ export async function POST(
         } = await import("@/lib/medicationLifecycle");
 
         // Fetch existing courses for this patient to run generalized reconciliation
-        const effPatientId = patientId || "483027156";
+        const effPatientId = patientId;
         let existingCourses: any[] = [];
         try {
           const rawExisting = await query(
-            `SELECT * FROM patient_medications WHERE patient_id = $1 OR user_id = $2;`,
+            `SELECT * FROM patient_medications WHERE patient_id = $1 OR (patient_id IS NULL AND user_id = $2);`,
             [effPatientId, userId]
           );
           existingCourses = rawExisting.map((r: any) => ({
@@ -316,7 +325,7 @@ export async function POST(
               `INSERT INTO observations (patient_id, prescription_id, obs_date, kind, systolic, diastolic, value, unit, raw_text, created_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
               [
-                patientId || "483027156",
+                patientId,
                 Number(id) || null,
                 eventDate,
                 kind,

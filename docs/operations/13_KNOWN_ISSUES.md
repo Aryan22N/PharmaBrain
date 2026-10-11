@@ -145,6 +145,26 @@ Owner: TBD
 
 ---
 
+### [KI-17] Hardcoded demo patient IDs leaking medications across new patient accounts — ✅ RESOLVED
+
+**Evidence:**
+- In `frontend/app/api/patient/medicines/route.ts`, the query hardcoded an array of demo IDs: `['CCM12578', 'demo-patient-1', '713590440', '545590541', '443213338', '960183477']`.
+- `patient_medications` queries used `WHERE patient_id = ANY($1::text[]) OR user_id = $2`.
+- Fallbacks in `frontend/app/api/confirm/[id]/route.ts` and `frontend/app/upload/page.tsx` defaulted missing patient IDs to `"483027156"` (Rahul Sharma).
+- Next.js running in standalone production mode inside Docker without host volume mounting required a container rebuild to deploy updates.
+
+**Impact:**
+Newly registered patients immediately saw 29+ demo medications belonging to other patients on `http://localhost:3000/patient/medicines` before uploading or confirming any prescriptions.
+
+**Fix:**
+- Created `frontend/lib/patientScope.ts` with `getPatientIds(user)` isolating queries to the user's authentic `P-...` and legacy IDs only.
+- Restricted SQL queries across `medicines`, `dashboard`, and `timeline` to `WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)`.
+- Removed `"483027156"` demo fallback across confirm, upload, and timeline routes.
+- Updated `frontend/lib/api.ts` to forward `Authorization: Bearer ${token}` on client requests.
+- Rebuilt frontend Docker container (`docker-compose build frontend` && `docker-compose up -d --no-deps frontend`). Verified fresh patients receive 0 medications and clean empty states.
+
+---
+
 ### [KI-16] Dev API token accepted in production if `API_TOKEN` is not set — 🔴 Critical
 
 **Evidence:** `require_key()` → `if not API_TOKEN or API_TOKEN == DEV_API_TOKEN: if not x_api_key or x_api_key == DEV_API_TOKEN: return`  
