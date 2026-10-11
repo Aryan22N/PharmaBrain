@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
               a.summary, a."structuredResult"
        FROM "Document" d
        LEFT JOIN "Analysis" a ON d.id = a."documentId"
-       WHERE d."userId" = $1 OR d."patientId" = ANY($2::text[])
+       WHERE (d."userId" = $1 OR d."patientId" = ANY($2::text[]))
+         AND d.status != 'DISCARDED'
        ORDER BY d."uploadedAt" DESC;`,
       [payload.userId, patientIds]
     );
@@ -44,6 +45,9 @@ export async function GET(req: NextRequest) {
       const facility = sr.hospital || "City Care Medical Centre";
       const doctor = typeof sr.doctor === 'string' ? sr.doctor : sr.doctor?.name || "Consulting Physician";
       const refId = sr.reference_id || `HMS-DOC-${doc.id}`;
+      const extractionId = doc.filePath && doc.filePath.startsWith('/extractions/')
+        ? doc.filePath.replace('/extractions/', '')
+        : doc.id;
 
       let category = "Consultation";
       const nameLower = (doc.originalName || "").toLowerCase();
@@ -61,21 +65,24 @@ export async function GET(req: NextRequest) {
 
       return {
         id: `doc-${doc.id}`,
+        document_id: doc.id,
+        extraction_id: extractionId,
         patient_id: patientId,
         user_id: payload.userId,
         event_date: docDate,
         category,
-        title: doc.originalName || "Clinical Encounter Record",
-        description: doc.summary || "Verified medical record stored in patient electronic health summary.",
-        source: isConfirmed ? "Hospital HMS" : "Diagnostic Lab",
-        reliability: isConfirmed ? "High" : "Medium",
-        verification_status: isConfirmed ? "Hospital Verified" : "Patient Confirmed",
+        title: isConfirmed ? (doc.originalName || "Clinical Encounter Record") : (doc.originalName || "Prescription Scan (Draft)"),
+        description: doc.summary || (isConfirmed ? "Verified medical record stored in patient electronic health summary." : "Prescription scan awaiting patient review and confirmation."),
+        source: isConfirmed ? "Prescription Scan" : "Uploaded Document",
+        reliability: isConfirmed ? "High" : "Pending Review",
+        verification_status: isConfirmed ? "Prescription Verified" : "Awaiting Review",
         facility,
         doctor,
         reference_id: refId,
         is_conflicting: false,
         conflict_details: null,
         created_at: doc.uploadedAt,
+        status: doc.status,
       };
     });
 

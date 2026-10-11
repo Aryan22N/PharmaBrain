@@ -9,6 +9,26 @@ export interface DashboardMetrics {
   lastHbA1c: string;
   bloodPressure: string;
   historyCoverage: string;
+  activeConditionsCount?: number;
+  recordsToReviewCount?: number;
+}
+
+export interface BiomarkerMetric {
+  latestValue: string;
+  numericValue: number | null;
+  unit: string;
+  date: string | null;
+  targetRange: string;
+  statusLabel: string;
+  trendNote: string;
+  history: { value: number; date: string }[];
+}
+
+export interface VitalsState {
+  glucose: BiomarkerMetric;
+  hba1c: BiomarkerMetric;
+  bp: BiomarkerMetric;
+  weight: BiomarkerMetric;
 }
 
 export interface PatientDashboardContextType {
@@ -16,8 +36,19 @@ export interface PatientDashboardContextType {
   userData: any | null;
   metrics: DashboardMetrics;
   documents: any[];
+  pendingDocuments: any[];
+  conditions: any[];
+  allergies: any[];
+  vitals: VitalsState;
+  doctorSharing: any | null;
+  longitudinalSummary: {
+    diagnoses: string;
+    glycemicStatus: string;
+    regimen: string;
+  };
   timelineEvents: any[];
   recordedMedicines: any[];
+  conflictingMedicines: any[];
   refresh: () => Promise<void>;
 
   // Modals & detail states
@@ -38,11 +69,68 @@ export interface PatientDashboardContextType {
   setNewMedicine: React.Dispatch<React.SetStateAction<any>>;
   handleAddMedicine: (e: React.FormEvent) => Promise<void>;
 
+  addAllergyModalOpen: boolean;
+  setAddAllergyModalOpen: (open: boolean) => void;
+  submittingAllergy: boolean;
+  newAllergy: any;
+  setNewAllergy: React.Dispatch<React.SetStateAction<any>>;
+  handleAddAllergy: (e: React.FormEvent) => Promise<void>;
+
+  addConditionModalOpen: boolean;
+  setAddConditionModalOpen: (open: boolean) => void;
+  submittingCondition: boolean;
+  newCondition: any;
+  setNewCondition: React.Dispatch<React.SetStateAction<any>>;
+  handleAddCondition: (e: React.FormEvent) => Promise<void>;
+
   ocrModalOpen: boolean;
   setOcrModalOpen: (open: boolean) => void;
   notification: string | null;
   setNotification: (msg: string | null) => void;
 }
+
+const defaultVitals: VitalsState = {
+  glucose: {
+    latestValue: "--",
+    numericValue: null,
+    unit: "mg/dL",
+    date: null,
+    targetRange: "70 - 130 mg/dL (Fasting)",
+    statusLabel: "No data",
+    trendNote: "No fasting glucose recorded",
+    history: [],
+  },
+  hba1c: {
+    latestValue: "--",
+    numericValue: null,
+    unit: "%",
+    date: null,
+    targetRange: "< 7.0 % (Type 2 DM)",
+    statusLabel: "No data",
+    trendNote: "No HbA1c lab result recorded",
+    history: [],
+  },
+  bp: {
+    latestValue: "-- / --",
+    numericValue: null,
+    unit: "mmHg",
+    date: null,
+    targetRange: "< 130 / 80 mmHg",
+    statusLabel: "No data",
+    trendNote: "No blood pressure recorded",
+    history: [],
+  },
+  weight: {
+    latestValue: "--",
+    numericValue: null,
+    unit: "kg",
+    date: null,
+    targetRange: "62.0 - 72.0 kg (BMI 18.5 - 24.9)",
+    statusLabel: "No data",
+    trendNote: "No body weight recorded",
+    history: [],
+  },
+};
 
 const PatientDashboardContext = createContext<PatientDashboardContextType | null>(null);
 
@@ -54,7 +142,6 @@ export function usePatientDashboard(): PatientDashboardContextType {
   return ctx;
 }
 
-// Also export alias useDashboard for compatibility
 export const useDashboard = usePatientDashboard;
 
 export function PatientDashboardProvider({ children }: { children: React.ReactNode }) {
@@ -67,10 +154,23 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
     lastHbA1c: "--",
     bloodPressure: "--",
     historyCoverage: "0%",
+    activeConditionsCount: 0,
+    recordsToReviewCount: 0,
   });
   const [documents, setDocuments] = useState<any[]>([]);
+  const [pendingDocuments, setPendingDocuments] = useState<any[]>([]);
+  const [conditions, setConditions] = useState<any[]>([]);
+  const [allergies, setAllergies] = useState<any[]>([]);
+  const [vitals, setVitals] = useState<VitalsState>(defaultVitals);
+  const [doctorSharing, setDoctorSharing] = useState<any | null>(null);
+  const [longitudinalSummary, setLongitudinalSummary] = useState({
+    diagnoses: "No active clinical conditions recorded in electronic health record.",
+    glycemicStatus: "Glycemic biomarkers not yet documented in laboratory history.",
+    regimen: "No ongoing pharmacotherapy recorded.",
+  });
   const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
   const [recordedMedicines, setRecordedMedicines] = useState<any[]>([]);
+  const [conflictingMedicines, setConflictingMedicines] = useState<any[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
 
   // Selected summary record for full detail modal
@@ -86,7 +186,7 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
     description: "",
     source: "Manual Entry",
     facility: "Patient Home Portal",
-    doctor: "Rahul Sharma (Patient Self-Report)",
+    doctor: "Patient Self-Report",
     reliability: "Low",
     verification_status: "Patient Confirmed",
     reference_id: "",
@@ -105,13 +205,39 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
     frequency: "Once daily",
     route: "Oral",
     start_date: new Date().toISOString().split("T")[0],
-    doctor: "Dr. Priya Deshmukh",
+    doctor: "Consulting Physician",
     reference_id: "",
-    source: "Hospital HMS",
-    reliability: "High",
-    verification_status: "Hospital Verified",
+    source: "Manual Entry",
+    reliability: "Medium",
+    verification_status: "Patient Confirmed",
     is_conflicting: false,
     conflict_details: "",
+  });
+
+  // Add Allergy Modal state
+  const [addAllergyModalOpen, setAddAllergyModalOpen] = useState(false);
+  const [submittingAllergy, setSubmittingAllergy] = useState(false);
+  const [newAllergy, setNewAllergy] = useState({
+    allergen: "",
+    category: "Medication",
+    reaction: "",
+    severity: "Moderate",
+    status: "Patient Reported",
+    notes: "",
+  });
+
+  // Add Condition Modal state
+  const [addConditionModalOpen, setAddConditionModalOpen] = useState(false);
+  const [submittingCondition, setSubmittingCondition] = useState(false);
+  const [newCondition, setNewCondition] = useState({
+    condition_name: "",
+    category: "Chronic",
+    status: "ACTIVE",
+    diagnosed_date: new Date().toISOString().split("T")[0],
+    severity: "Moderate",
+    doctor: "Consulting Physician",
+    facility: "Clinical Care Center",
+    notes: "",
   });
 
   // OCR quick scan modal state
@@ -153,8 +279,15 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
         if (data.user) setUserData(data.user);
         if (data.metrics) setMetrics(data.metrics);
         if (data.documents) setDocuments(data.documents);
+        if (data.pendingDocuments) setPendingDocuments(data.pendingDocuments);
+        if (data.conditions) setConditions(data.conditions);
+        if (data.allergies) setAllergies(data.allergies);
+        if (data.vitals) setVitals(data.vitals);
+        if (data.doctorSharing) setDoctorSharing(data.doctorSharing);
+        if (data.longitudinalSummary) setLongitudinalSummary(data.longitudinalSummary);
         if (data.timelineEvents) setTimelineEvents(data.timelineEvents);
         if (data.recordedMedicines) setRecordedMedicines(data.recordedMedicines);
+        if (data.conflictingMedicines) setConflictingMedicines(data.conflictingMedicines);
       }
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
@@ -195,7 +328,7 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
           description: "",
           source: "Manual Entry",
           facility: "Patient Home Portal",
-          doctor: "Rahul Sharma (Patient Self-Report)",
+          doctor: "Patient Self-Report",
           reliability: "Low",
           verification_status: "Patient Confirmed",
           reference_id: "",
@@ -243,11 +376,11 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
           frequency: "Once daily",
           route: "Oral",
           start_date: new Date().toISOString().split("T")[0],
-          doctor: "Dr. Priya Deshmukh",
+          doctor: "Consulting Physician",
           reference_id: "",
-          source: "Hospital HMS",
-          reliability: "High",
-          verification_status: "Hospital Verified",
+          source: "Manual Entry",
+          reliability: "Medium",
+          verification_status: "Patient Confirmed",
           is_conflicting: false,
           conflict_details: "",
         });
@@ -263,6 +396,90 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
     }
   };
 
+  const handleAddAllergy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAllergy.allergen.trim()) return;
+    try {
+      setSubmittingAllergy(true);
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      if (!token) {
+        window.location.href = "/auth/patient/login";
+        return;
+      }
+      const res = await fetch("/api/patient/allergies", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newAllergy),
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        setAddAllergyModalOpen(false);
+        setNewAllergy({
+          allergen: "",
+          category: "Medication",
+          reaction: "",
+          severity: "Moderate",
+          status: "Patient Reported",
+          notes: "",
+        });
+        setNotification("Allergy record saved successfully!");
+        await fetchDashboardData();
+      } else {
+        alert(resData.error || "Failed to save allergy");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setSubmittingAllergy(false);
+    }
+  };
+
+  const handleAddCondition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCondition.condition_name.trim()) return;
+    try {
+      setSubmittingCondition(true);
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      if (!token) {
+        window.location.href = "/auth/patient/login";
+        return;
+      }
+      const res = await fetch("/api/patient/conditions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newCondition),
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        setAddConditionModalOpen(false);
+        setNewCondition({
+          condition_name: "",
+          category: "Chronic",
+          status: "ACTIVE",
+          diagnosed_date: new Date().toISOString().split("T")[0],
+          severity: "Moderate",
+          doctor: "Consulting Physician",
+          facility: "Clinical Care Center",
+          notes: "",
+        });
+        setNotification("Clinical condition added successfully!");
+        await fetchDashboardData();
+      } else {
+        alert(resData.error || "Failed to add condition");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setSubmittingCondition(false);
+    }
+  };
+
   return (
     <PatientDashboardContext.Provider
       value={{
@@ -270,8 +487,15 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
         userData,
         metrics,
         documents,
+        pendingDocuments,
+        conditions,
+        allergies,
+        vitals,
+        doctorSharing,
+        longitudinalSummary,
         timelineEvents,
         recordedMedicines,
+        conflictingMedicines,
         refresh: fetchDashboardData,
         selectedSummaryRecord,
         setSelectedSummaryRecord,
@@ -287,6 +511,18 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
         newMedicine,
         setNewMedicine,
         handleAddMedicine,
+        addAllergyModalOpen,
+        setAddAllergyModalOpen,
+        submittingAllergy,
+        newAllergy,
+        setNewAllergy,
+        handleAddAllergy,
+        addConditionModalOpen,
+        setAddConditionModalOpen,
+        submittingCondition,
+        newCondition,
+        setNewCondition,
+        handleAddCondition,
         ocrModalOpen,
         setOcrModalOpen,
         notification,
