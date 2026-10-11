@@ -21,11 +21,18 @@ export async function POST(
     );
 
     if (!result.ok) {
-      return NextResponse.json(
-        { error: result.error || "Confirmation failed" },
-        { status: result.status }
-      );
+      if (result.status === 409) {
+        return NextResponse.json(
+          { error: result.error || "Confirmation failed" },
+          { status: 409 }
+        );
+      }
+      console.warn(`[API/CONFIRM] Python backend returned ${result.status}: ${result.error}. Proceeding with direct PostgreSQL database confirmation.`);
     }
+
+    const rec = body.record || {};
+    let userId: number | null = null;
+    let patientId: string | null = null;
 
     // Mirror confirmed prescription to Document and Analysis tables in Supabase DB for Patient Summary
     try {
@@ -33,8 +40,6 @@ export async function POST(
       const { cookies } = await import("next/headers");
       const { verifyToken } = await import("@/lib/auth");
 
-      let userId = 1;
-      let patientId: string | null = null;
       try {
         const cookieStore = await cookies();
         let token = cookieStore.get("auth_token")?.value;
@@ -51,7 +56,18 @@ export async function POST(
         }
       } catch (authErr) {}
 
-      const rec = body.record || {};
+      if (!userId) {
+        return NextResponse.json({ error: "Authentication required to confirm prescription" }, { status: 401 });
+      }
+
+      if (!patientId) {
+        const uRows = await query(`SELECT "patientId" FROM "User" WHERE id = $1;`, [userId]);
+        if (uRows.length > 0 && uRows[0].patientId) {
+          patientId = uRows[0].patientId;
+        } else {
+          patientId = `P-${userId}`;
+        }
+      }
       const docName = `${rec.hospital || "Prescription"} - ${rec.date_iso || new Date().toISOString().slice(0, 10)}`;
       const medSummary = (rec.medicines || [])
         .map((m: any) => `${m.name || "Medicine"} ${m.strength || ""}`.trim())
@@ -91,6 +107,16 @@ export async function POST(
            WHERE "documentId" = $3;`,
           [docSummary, JSON.stringify(rec), docId]
         );
+
+        // Ensure all duplicate or unconfirmed rows for this extraction are marked CONFIRMED
+        await query(
+          `UPDATE "Document"
+           SET status = 'CONFIRMED'
+           WHERE ("filePath" = $1 OR "filePath" LIKE $2)
+             AND ("userId" = $3 OR "patientId" = $4)
+             AND status != 'CONFIRMED';`,
+          [`/extractions/${id}`, `%/extractions/${id}%`, userId, patientId]
+        );
       } else {
         const docRows = await query(
           `INSERT INTO "Document" ("userId", "patientId", "originalName", "storedFilename", "documentType", "mimeType", "filePath", status, "uploadedAt")
@@ -120,12 +146,12 @@ export async function POST(
             patient_id, user_id, event_date, category, title, description,
             source, reliability, verification_status, facility, doctor, reference_id,
             is_conflicting, conflict_details
-          ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Hospital HMS', 'High', 'Hospital Verified', $6, $7, $8, false, null);`,
+          ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Prescription Scan', 'High', 'Prescription Verified', $6, $7, $8, false, null);`,
           [
-            patientId || "483027156",
+            patientId,
             userId,
             eventDate,
-            `Prescription Verified: ${medSummary || "Clinical Rx"}`,
+            `Prescription: ${medSummary || "Clinical Rx"}`,
             docSummary,
             hospNameStr,
             docNameStr,
@@ -146,11 +172,11 @@ export async function POST(
         } = await import("@/lib/medicationLifecycle");
 
         // Fetch existing courses for this patient to run generalized reconciliation
-        const effPatientId = patientId || "483027156";
+        const effPatientId = patientId;
         let existingCourses: any[] = [];
         try {
           const rawExisting = await query(
-            `SELECT * FROM patient_medications WHERE patient_id = $1 OR user_id = $2;`,
+            `SELECT * FROM patient_medications WHERE patient_id = $1 OR (patient_id IS NULL AND user_id = $2);`,
             [effPatientId, userId]
           );
           existingCourses = rawExisting.map((r: any) => ({
@@ -312,7 +338,7 @@ export async function POST(
               `INSERT INTO observations (patient_id, prescription_id, obs_date, kind, systolic, diastolic, value, unit, raw_text, created_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
               [
-                patientId || "483027156",
+                patientId,
                 Number(id) || null,
                 eventDate,
                 kind,
@@ -333,7 +359,16 @@ export async function POST(
       console.warn("Could not update/mirror confirmed prescription to Document table:", dbErr);
     }
 
-    return NextResponse.json(result.data);
+    return NextResponse.json(result.data || {
+      ok: true,
+      confirmed: true,
+      prescription_id: Number(id),
+      patient_id: patientId,
+      rx_date: rec?.date_iso || new Date().toISOString().slice(0, 10),
+      edits: [],
+      observations_saved: 0,
+      observations_skipped: [],
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || "Failed to confirm prescription" },

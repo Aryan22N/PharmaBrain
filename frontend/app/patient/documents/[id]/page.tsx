@@ -32,6 +32,7 @@ import {
   FileImage,
   Pill,
   Check,
+  Trash2,
 } from "lucide-react";
 
 export default function PatientDocumentDetailPage({
@@ -239,7 +240,7 @@ export default function PatientDocumentDetailPage({
                     : "text-amber-800 bg-amber-50 border border-amber-300"
                 }`}
               >
-                {isConfirmed ? "Hospital Verified" : "Draft Summary"}
+                {isConfirmed ? "Prescription Verified" : "Draft Summary"}
               </span>
               <GateBadge gate={payload.gate} />
             </div>
@@ -411,13 +412,18 @@ export default function PatientDocumentDetailPage({
           </div>
 
           {/* Confirmation Action Bar */}
-          {isPending && (
+          {!isConfirmed && !isDiscarded && (
             <div className="sticky bottom-4 p-4 rounded-2xl bg-white/95 border border-teal-200 shadow-xl backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <ShieldCheck className="w-5 h-5 text-teal-600" />
-                <span className="text-xs font-bold text-slate-900">
-                  Confirm Prescription Order
-                </span>
+                <div>
+                  <span className="text-xs font-bold text-slate-900 block">
+                    Prescription Ready for Confirmation
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Verify medications and click confirm to save to your clinical timeline.
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center gap-3">
@@ -425,9 +431,10 @@ export default function PatientDocumentDetailPage({
                   type="button"
                   disabled={discarding}
                   onClick={handleDiscard}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 text-xs font-semibold transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  {discarding ? "Discarding..." : "Discard Draft"}
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{discarding ? "Discarding..." : "Discard Draft"}</span>
                 </button>
 
                 <button
@@ -437,7 +444,7 @@ export default function PatientDocumentDetailPage({
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#008080] hover:bg-[#006666] text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  {confirming ? "Saving Record..." : "Confirm & Save to Record"}
+                  <span>{confirming ? "Saving Record..." : "Confirm & Save to Record"}</span>
                 </button>
               </div>
             </div>

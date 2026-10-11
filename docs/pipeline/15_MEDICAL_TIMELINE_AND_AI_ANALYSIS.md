@@ -109,7 +109,7 @@ This table stores every uploaded prescription, diagnostic report, and consultati
 
 ### Table 2: `patient_timeline_events` (Custom & Reconciled Timeline Notes)
 
-Stores longitudinal events, clinician notes, patient self-reports, and auto-generated timeline entries created upon prescription confirmation.
+Stores longitudinal events, clinician notes, patient self-reports, and auto-generated timeline entries created upon prescription confirmation or draft upload.
 
 - **Schema Definition:**
   ```sql
@@ -132,6 +132,10 @@ Stores longitudinal events, clinician notes, patient self-reports, and auto-gene
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
   ```
+- **Provenance & Verification Attribution:**
+  - **Confirmed Prescription Scans:** `source = 'Prescription Scan'`, `reliability = 'High'`, `verification_status = 'Prescription Verified'`.
+  - **Unconfirmed Draft Scans:** `source = 'Uploaded Document'`, `reliability = 'Pending Review'`, `verification_status = 'Awaiting Review'`.
+  - **Hospital Direct Integration:** `source = 'Hospital HMS'`, `reliability = 'High'`, `verification_status = 'Hospital Verified'`. (Strictly reserved for authentic EHR sync).
 - **Query:**
   ```sql
   SELECT id, patient_id, user_id, event_date, category, title, description,
@@ -166,9 +170,9 @@ Tracks active and past medications with verification reliability.
       reference_id VARCHAR(80),
       is_conflicting BOOLEAN DEFAULT false,
       conflict_details TEXT,
-      source VARCHAR(64) DEFAULT 'Hospital HMS',
+      source VARCHAR(64) DEFAULT 'Prescription Scan',
       reliability VARCHAR(64) DEFAULT 'High',
-      verification_status VARCHAR(64) DEFAULT 'Hospital Verified',
+      verification_status VARCHAR(64) DEFAULT 'Prescription Verified',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
   ```
@@ -235,7 +239,7 @@ In `frontend/app/api/user/dashboard/route.ts` and `frontend/app/api/patient/time
    unifiedTimeline.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
    ```
 3. **Discrepancy & Conflict Detection:**
-   If a patient self-reports a dosage (e.g. *Metformin 1000 mg*) that differs from the Hospital HMS record (*Metformin 500 mg BID*), the engine detects the difference:
+   If a patient self-reports a dosage (e.g. *Metformin 1000 mg*) that differs from the Hospital record (*Metformin 500 mg BID*), the engine detects the difference:
    ```typescript
    if (m.is_conflicting || (m.strength && existing.strength && m.strength.toLowerCase() !== existing.strength.toLowerCase())) {
      existing.is_conflicting = true;
@@ -243,6 +247,20 @@ In `frontend/app/api/user/dashboard/route.ts` and `frontend/app/api/patient/time
    }
    ```
    The UI highlights this with a high-visibility **"Active Clinical Discrepancy Flagged — SAFETY PRIORITY"** warning banner.
+
+4. **Prescription Draft Abandonment, Recovery & Discard Lifecycle:**
+   When a prescription is photographed and uploaded, PaddleOCR + Gemini extraction runs immediately, creating draft entries in `"Document"` and `"Analysis"`. If the patient accidentally navigates away to the Health Timeline before completing human confirmation:
+   - The timeline flags the event as an **Unsaved Draft** with status `Awaiting Review` (amber border and badge).
+   - A top alert banner informs the user of pending unconfirmed drafts.
+   - An inline actionable card provides two options:
+     - **Discard Draft**: Triggers `POST /api/discard/[id]`, which deletes the record from PostgreSQL (`Document`, `Analysis`, and `patient_timeline_events`) and notifies the Python backend.
+     - **Review & Submit**: Directs to `/patient/documents/[id]`. If the Python in-memory cache has expired, `GET /api/extractions/[id]` transparently reconstructs the extraction payload from PostgreSQL `"Document"` and `"Analysis"`, ensuring a smooth review workflow without 404 errors.
+
+5. **Real-Time Longitudinal Health Summary Synthesis (Clinical Overview):**
+   The "Longitudinal Health Summary" card on `/patient/overview` (Diagnoses, Glycemic Status, Ongoing Regimen) is **not hardcoded**. It is synthesized dynamically on every request in `frontend/app/api/user/dashboard/route.ts`:
+   - **Diagnoses**: Queries `conditions` table where `status = 'ACTIVE'`. If empty, returns `"No active clinical conditions diagnosed or recorded in health record."`
+   - **Glycemic Status**: Evaluates latest values from `observations` table (`hba1c` and `glucose`). If present, computes clinical status label; if absent, returns `"Glycemic biomarkers not yet documented in laboratory history."`
+   - **Ongoing Regimen**: Synthesizes active medications from `recordedMedicines` (`status = 'ACTIVE'`). If empty, returns `"No ongoing pharmacotherapy recorded."`
 
 ---
 

@@ -86,7 +86,12 @@ Owner: TBD
 
 ---
 
-## User Data Isolation
+## User Data Isolation & Multi-Tenant Boundaries
+
+- **Strict Patient Account Scoping**: Medication records (`patient_medications`), confirmed prescriptions, documents, observations, and health timelines are strictly scoped to the authenticated patient's persistent identifier (`P-...` or legacy ID) derived from the verified JWT / session.
+- **Zero Cross-Account Leakage**: Under no circumstances are hardcoded demo IDs or fallback accounts (e.g. Rahul Sharma `483027156`) injected into query scopes. Fresh patient accounts without uploaded prescriptions receive verified zero-state responses (`counts.total = 0`).
+- **Database Query Clauses**: Multi-tenant queries enforce `WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)` to prevent accidental record collisions across accounts.
+- **Client Header Forwarding**: All client API invocations forward `Authorization: Bearer <token>` to guarantee session identity is preserved through Next.js proxy endpoints.
 
 - Row-Level Security (RLS) is enabled in Supabase on `"User"`, `"Document"`, `"Analysis"`, `confirmed_prescriptions`, `observations`, `raw_ocr`, `extractions`. Policies grant full access via service role (backend). Direct user-level RLS policies are not implemented — application-level isolation via JWT `patient_id` is the current control.
 - End-to-end auth isolation is tested in `scratch/test_e2e_auth_isolation.py`.

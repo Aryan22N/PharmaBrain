@@ -1,30 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { cookies } from "next/headers";
-import { verifyToken } from "@/lib/auth";
+import { requirePatientSession } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    let token = cookieStore.get("auth_token")?.value;
-
-    if (!token) {
-      const authHeader = req.headers.get("authorization");
-      if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.substring(7);
-      }
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid or expired session token." }, { status: 401 });
-    }
+    const { payload } = authResult;
 
     const body = await req.json().catch(() => null);
     if (!body) {
@@ -110,23 +96,11 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    let token = cookieStore.get("auth_token")?.value;
-    if (!token) {
-      const authHeader = req.headers.get("authorization");
-      if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.substring(7);
-      }
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
+    const { payload } = authResult;
 
     const rows = await query(
       `SELECT basic_info, conditions, custom_conditions, history, is_completed 

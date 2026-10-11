@@ -27,10 +27,12 @@
 | **Lifecycle Signification Guide**| UI explanation of Completed, Hold, and Discontinue | Complete | Educational guide banner on `/patient/medicines` and in-modal guidance |
 | **Provenance Tag Cleanup** | Removed misleading "Hospital HMS" / "Verified" | Complete | Replaced with accurate "Prescription Scan" / "Prescription Verified" |
 | **Discontinue Reason Guard** | Requires clinical reason to discontinue | Complete | Rejects empty reasons with HTTP 422 |
-| **Cross-Patient Security** | Prevents modifying another patient's medicines | Complete | Rejects foreign IDs with HTTP 403 Forbidden |
+| **Cross-Patient Security** | Prevents reading or modifying another patient's medicines | Complete | Medication reads/synchronization use only the authenticated patient's canonical/legacy IDs; foreign lifecycle IDs are rejected with HTTP 403 Forbidden |
+| **Multi-Tenant Zero-State** | Fresh patients see 0 medications until prescriptions uploaded | Complete | Removed demo patient IDs (`CCM12578`, `713590440`, etc.) and fallback to `483027156`; returns empty collections (`counts.total = 0`) verified in container |
 | **3-Section UI Dashboard** | Current Medicines, Medical History, Needs Review | Complete | `frontend/app/patient/medicines/page.tsx` |
 | **Inspection Modal** | View source prescription scan and clinician details | Complete | Source prescription viewer modal anchored to Supabase Storage |
 | **Prescription Image Scan & Zoom** | Original prescription image, click-to-view, and high-res link | Complete | `inspectModal` preview with hover zoom, new-tab viewer, and fallback in `page.tsx` |
+| **Conflicting Medicines Overview Card** | Replaced empty review card on patient overview with real conflicting medicines card | Complete | `frontend/app/patient/overview/page.tsx` linked to `conflictingMedicines` API |
 
 ---
 

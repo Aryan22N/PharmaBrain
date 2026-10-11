@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { comparePassword, generateToken, generate9DigitPatientId } from '@/lib/auth';
+import { comparePassword, generateToken } from '@/lib/auth';
 
 export async function POST(request: Request) {
   try {
@@ -9,7 +9,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid JSON request body' }, { status: 400 });
     }
 
-    const { email, password } = body;
+    const { email, password, role: requestedRole } = body;
 
     if (!email || !password) {
       return NextResponse.json(
@@ -21,7 +21,9 @@ export async function POST(request: Request) {
     const trimmedEmail = email.trim().toLowerCase();
 
     const users = await query(
-      `SELECT id, name, email, "passwordHash", "patientId", "legacyPatientId" 
+      `SELECT id, name, email, "passwordHash", "patientId", "legacyPatientId", 
+              role, "doctorId", "doctorVerificationStatus", 
+              "medicalLicenseNumber", "specialization", "hospitalAffiliation"
        FROM "User" 
        WHERE LOWER(email) = LOWER($1) 
        LIMIT 1;`,
@@ -36,6 +38,22 @@ export async function POST(request: Request) {
     }
 
     const user = users[0];
+    const userRole = user.role || 'PATIENT';
+
+    // Verify role matches portal: reject doctor accounts attempting patient portal login
+    if (userRole === 'DOCTOR' && (!requestedRole || requestedRole.toUpperCase() === 'PATIENT')) {
+      return NextResponse.json(
+        { error: 'This account is registered as a Doctor. Please sign in through the Doctor Portal.' },
+        { status: 403 }
+      );
+    }
+    if (requestedRole && requestedRole.toUpperCase() === 'DOCTOR' && userRole === 'PATIENT') {
+      return NextResponse.json(
+        { error: 'This account is registered as a Patient. Please sign in through the Patient Portal.' },
+        { status: 403 }
+      );
+    }
+
     const isPasswordValid = await comparePassword(password, user.passwordHash);
 
     if (!isPasswordValid) {
@@ -45,10 +63,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Ensure user has a valid 9-digit patient ID permanently stored
+    // For patients, ensure valid patient ID
     let patientId = user.patientId;
-    if (!patientId) {
-      patientId = generate9DigitPatientId();
+    if (userRole === 'PATIENT' && !patientId) {
+      const { generatePatientId } = await import('@/lib/auth');
+      patientId = generatePatientId();
       await query(
         `UPDATE "User" SET "patientId" = $1 WHERE id = $2;`,
         [patientId, user.id]
@@ -59,7 +78,10 @@ export async function POST(request: Request) {
       userId: user.id,
       email: user.email,
       name: user.name,
-      patientId,
+      role: userRole,
+      patientId: userRole === 'PATIENT' ? patientId : null,
+      doctorId: userRole === 'DOCTOR' ? user.doctorId : null,
+      doctorVerificationStatus: userRole === 'DOCTOR' ? user.doctorVerificationStatus : null,
     });
 
     const response = NextResponse.json(
@@ -69,8 +91,14 @@ export async function POST(request: Request) {
           id: user.id,
           name: user.name,
           email: user.email,
-          patientId,
+          role: userRole,
+          patientId: userRole === 'PATIENT' ? patientId : null,
           legacyPatientId: user.legacyPatientId || null,
+          doctorId: userRole === 'DOCTOR' ? user.doctorId : null,
+          doctorVerificationStatus: userRole === 'DOCTOR' ? user.doctorVerificationStatus : null,
+          medicalLicenseNumber: userRole === 'DOCTOR' ? user.medicalLicenseNumber : null,
+          specialization: userRole === 'DOCTOR' ? user.specialization : null,
+          hospitalAffiliation: userRole === 'DOCTOR' ? user.hospitalAffiliation : null,
         },
         token,
       },
@@ -86,10 +114,11 @@ export async function POST(request: Request) {
     });
 
     return response;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Login API Error:', error);
+    const message = error instanceof Error ? error.message : 'Server error during login';
     return NextResponse.json(
-      { error: error.message || 'Server error during login' },
+      { error: message },
       { status: 500 }
     );
   }

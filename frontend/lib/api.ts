@@ -101,6 +101,19 @@ export async function pythonBackendFetch<T>(
 }
 
 /**
+ * Helper to get Authorization header from client-side localStorage if available.
+ */
+function getClientAuthHeaders(): Record<string, string> {
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("auth_token");
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+  }
+  return {};
+}
+
+/**
  * Client-side API functions to interact with Next.js App Router API endpoints.
  */
 export const clientApi = {
@@ -115,7 +128,9 @@ export const clientApi = {
 
   async listExtractions(patientId?: string): Promise<ExtractionSummaryItem[]> {
     const url = patientId ? `/api/extractions?patient_id=${encodeURIComponent(patientId)}` : "/api/extractions";
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: { ...getClientAuthHeaders() },
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to fetch extractions (${res.status})`);
@@ -124,7 +139,9 @@ export const clientApi = {
   },
 
   async getExtraction(id: number): Promise<ExtractionPayload> {
-    const res = await fetch(`/api/extractions/${id}`);
+    const res = await fetch(`/api/extractions/${id}`, {
+      headers: { ...getClientAuthHeaders() },
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to fetch extraction #${id}`);
@@ -133,7 +150,9 @@ export const clientApi = {
   },
 
   async getRawOcr(ocrId: number): Promise<RawOcrData> {
-    const res = await fetch(`/api/raw-ocr/${ocrId}`);
+    const res = await fetch(`/api/raw-ocr/${ocrId}`, {
+      headers: { ...getClientAuthHeaders() },
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to fetch raw OCR #${ocrId}`);
@@ -143,12 +162,14 @@ export const clientApi = {
 
   async uploadPrescription(
     file: File,
-    patientId: string,
+    patientId?: string,
     patientName?: string
   ): Promise<ExtractionPayload> {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("patient_id", patientId);
+    if (patientId && patientId.trim()) {
+      formData.append("patient_id", patientId.trim());
+    }
     if (patientName && patientName.trim()) {
       formData.append("patient_name", patientName.trim());
     }
@@ -160,6 +181,7 @@ export const clientApi = {
     try {
       const res = await fetch("/api/ocr", {
         method: "POST",
+        headers: { ...getClientAuthHeaders() },
         body: formData,
         signal: controller.signal,
       });
@@ -196,7 +218,10 @@ export const clientApi = {
   ): Promise<ConfirmResult> {
     const res = await fetch(`/api/confirm/${extractionId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...getClientAuthHeaders(),
+      },
       body: JSON.stringify({
         record,
         confirmed_by: confirmedBy || null,
@@ -217,6 +242,7 @@ export const clientApi = {
   async discardExtraction(extractionId: number): Promise<{ ok: boolean }> {
     const res = await fetch(`/api/discard/${extractionId}`, {
       method: "POST",
+      headers: { ...getClientAuthHeaders() },
     });
 
     const body = await res.json().catch(() => ({}));

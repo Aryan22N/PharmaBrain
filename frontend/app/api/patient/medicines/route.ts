@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
+import { requirePatientSession } from "@/lib/serverAuth";
+import { getPatientIds, getPrimaryPatientId } from "@/lib/patientScope";
 import {
   MedicationCourse,
   MedicationLifecycleStatus,
@@ -45,7 +46,7 @@ async function syncConfirmedPrescriptionsToMedications(
 
     // 3. Fetch existing medications already stored in patient_medications
     const existingMedsRaw = await query(
-      `SELECT * FROM patient_medications WHERE patient_id = ANY($1::text[]) OR user_id = $2;`,
+      `SELECT * FROM patient_medications WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2);`,
       [patientIds, userId]
     );
 
@@ -371,34 +372,29 @@ async function syncConfirmedPrescriptionsToMedications(
  */
 export async function GET(req: NextRequest) {
   try {
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
+    const { user, payload } = authResult;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const patientIds = getPatientIds(user);
+    const patientId = getPrimaryPatientId(user);
+    if (!patientId || patientIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        medications: [],
+        current: [],
+        history: [],
+        needsReview: [],
+        medicines: [],
+        counts: { total: 0, active: 0, history: 0, needsReview: 0, conflicts: 0 },
+        activeCount: 0,
+        historicalCount: 0,
+        conflictsCount: 0,
+        filterOptions: { doctors: [], indications: [], statuses: [] },
+      });
     }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const patientId = payload.patientId || "483027156";
-    const patientIds = Array.from(
-      new Set(
-        [patientId, "CCM12578", "demo-patient-1", "713590440", "545590541", "443213338", "960183477"].filter(
-          Boolean
-        )
-      )
-    );
 
     // Sync any newly confirmed prescriptions into patient_medications
     await syncConfirmedPrescriptionsToMedications(patientIds, payload.userId);
@@ -411,7 +407,7 @@ export async function GET(req: NextRequest) {
               discontinued_reason, status_reason, doctor, reference_id, reconciliation_category, reconciliation_notes,
               is_conflicting, conflict_details, source, reliability, verification_status, created_at, updated_at
        FROM patient_medications
-       WHERE patient_id = ANY($1::text[]) OR user_id = $2
+       WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
        ORDER BY 
          CASE 
            WHEN status = 'ACTIVE' THEN 1
@@ -607,25 +603,11 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
+    const { user, payload } = authResult;
 
     const body = await req.json().catch(() => ({}));
     const {
@@ -648,14 +630,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Medication name is required" }, { status: 400 });
     }
 
-    const patientId = payload.patientId || "483027156";
-    const patientIds = Array.from(
-      new Set(
-        [patientId, "CCM12578", "demo-patient-1", "713590440", "545590541", "443213338", "960183477"].filter(
-          Boolean
-        )
-      )
-    );
+    const patientIds = getPatientIds(user);
+    const patientId = getPrimaryPatientId(user);
+    if (!patientId || patientIds.length === 0) {
+      return NextResponse.json(
+        { error: "Patient identity is not configured for this account" },
+        { status: 403 }
+      );
+    }
 
     const normName = normalizeMedicineName(name);
     const durationDays = parsePrescribedDuration(durationRaw);
@@ -665,7 +647,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch existing courses for reconciliation
     const existingRows = await query(
-      `SELECT * FROM patient_medications WHERE patient_id = ANY($1::text[]) OR user_id = $2;`,
+      `SELECT * FROM patient_medications WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2);`,
       [patientIds, payload.userId]
     );
 

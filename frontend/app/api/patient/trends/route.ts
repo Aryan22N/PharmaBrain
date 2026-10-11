@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyToken, generate9DigitPatientId } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { requirePatientSession } from "@/lib/serverAuth";
 import {
   calculatePatientTrends,
   PatientLongitudinalTrends,
@@ -505,40 +506,13 @@ export async function GET(req: NextRequest) {
       req.nextUrl.searchParams.get("refresh") === "true";
     const generateAi = req.nextUrl.searchParams.get("generate") === "true";
 
-    // 1. Authenticate patient request
-    const cookieStore = await cookies();
-    let token = cookieStore.get("auth_token")?.value;
-
-    if (!token) {
-      const authHeader = req.headers.get("authorization");
-      if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.substring(7);
-      }
+    // 1. Authenticate patient request and enforce role
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
+    const { user, payload } = authResult;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "Invalid or expired token." }, { status: 401 });
-    }
-
-    // 2. Fetch User Profile
-    const users = await query(
-      `SELECT id, name, email, "patientId", "legacyPatientId" 
-       FROM "User" 
-       WHERE id = $1 
-       LIMIT 1;`,
-      [payload.userId]
-    );
-
-    if (users.length === 0) {
-      return NextResponse.json({ error: "User profile not found." }, { status: 404 });
-    }
-
-    const user = users[0];
     let patientCode = user.patientId;
     if (!patientCode) {
       patientCode = generate9DigitPatientId();
@@ -546,7 +520,9 @@ export async function GET(req: NextRequest) {
       user.patientId = patientCode;
     }
 
-    const patientIds = [user.patientId, user.legacyPatientId, String(user.id)].filter(Boolean);
+    const patientIds: string[] = [user.patientId, user.legacyPatientId, String(user.id)].filter(
+      (id): id is string => Boolean(id)
+    );
 
     // 3. Verify prescription eligibility (Backend Enforcement: >= 5 confirmed, non-duplicate clinical dates)
     const { eligibility, documents } = await verifyPrescriptionEligibility(user, patientIds);

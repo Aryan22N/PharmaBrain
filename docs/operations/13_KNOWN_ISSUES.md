@@ -145,11 +145,110 @@ Owner: TBD
 
 ---
 
+### [KI-17] Hardcoded demo patient IDs leaking medications across new patient accounts — ✅ RESOLVED
+
+**Evidence:**
+- In `frontend/app/api/patient/medicines/route.ts`, the query hardcoded an array of demo IDs: `['CCM12578', 'demo-patient-1', '713590440', '545590541', '443213338', '960183477']`.
+- `patient_medications` queries used `WHERE patient_id = ANY($1::text[]) OR user_id = $2`.
+- Fallbacks in `frontend/app/api/confirm/[id]/route.ts` and `frontend/app/upload/page.tsx` defaulted missing patient IDs to `"483027156"` (Rahul Sharma).
+- Next.js running in standalone production mode inside Docker without host volume mounting required a container rebuild to deploy updates.
+
+**Impact:**
+Newly registered patients immediately saw 29+ demo medications belonging to other patients on `http://localhost:3000/patient/medicines` before uploading or confirming any prescriptions.
+
+**Fix:**
+- Created `frontend/lib/patientScope.ts` with `getPatientIds(user)` isolating queries to the user's authentic `P-...` and legacy IDs only.
+- Restricted SQL queries across `medicines`, `dashboard`, and `timeline` to `WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)`.
+- Removed `"483027156"` demo fallback across confirm, upload, and timeline routes.
+- Updated `frontend/lib/api.ts` to forward `Authorization: Bearer ${token}` on client requests.
+- Rebuilt frontend Docker container (`docker-compose build frontend` && `docker-compose up -d --no-deps frontend`). Verified fresh patients receive 0 medications and clean empty states.
+
+---
+
 ### [KI-16] Dev API token accepted in production if `API_TOKEN` is not set — 🔴 Critical
 
 **Evidence:** `require_key()` → `if not API_TOKEN or API_TOKEN == DEV_API_TOKEN: if not x_api_key or x_api_key == DEV_API_TOKEN: return`  
 **Impact:** If `API_TOKEN` is not set in production, the well-known dev token `rx_local_dev_token_2026_secure` grants full API access.  
 **Fix:** Fail hard at startup if `API_TOKEN` is not set or equals the dev token in production.
+
+---
+
+### [KI-18] Unconfirmed OCR prescription draft abandonment marked as clinical encounter without discard/recovery flow — ✅ RESOLVED
+
+**Evidence:**
+- In `frontend/app/upload/page.tsx` and `frontend/app/patient/documents/[id]/page.tsx`, if a patient uploaded a prescription and subsequently navigated away (e.g. clicking "Health Timeline" in sidebar) before completing review/confirmation:
+  1. The extraction was persisted to PostgreSQL `"Document"` and `"Analysis"` tables with `status = 'NOT CONFIRMED'`.
+  2. `frontend/app/api/patient/timeline/route.ts` mapped unconfirmed documents into `patient_timeline_events` with category "Clinical Review" or "Medication", appearing on `/patient/timeline` as an encounter without any draft indicators.
+  3. The patient had no UI mechanism on the timeline to discard the abandoned draft or resume editing/submitting.
+  4. If the Python backend's in-memory extraction cache had expired or flushed, navigating to `/patient/documents/[id]` produced a 404/500 error.
+
+**Impact:**
+Patients mistakenly believed unreviewed prescriptions were saved to their medical history, while having no way to delete false drafts or complete review.
+
+**Fix:**
+- Updated `frontend/app/api/patient/timeline/route.ts` and `frontend/app/api/user/dashboard/route.ts`:
+  - Unconfirmed drafts are explicitly flagged with `status: doc.status`, `title: doc.originalName || "Prescription Scan (Draft)"`, `description: "Prescription scan awaiting patient review and confirmation."`, `source: "Uploaded Document"`, `reliability: "Pending Review"`, and `verification_status: "Awaiting Review"`.
+- Upgraded `frontend/app/patient/timeline/page.tsx`:
+  - Added a prominent top alert banner notifying patients of pending prescription drafts.
+  - Added inline draft callout cards on each unconfirmed event featuring **"Discard Draft"** and **"Review & Submit"** buttons.
+  - Added visual badges `Awaiting Review` (amber) and `Unsaved Draft`.
+- Upgraded `frontend/app/api/discard/[id]/route.ts`:
+  - Enforces database cleanup by deleting matching rows from `"Analysis"`, `"Document"`, and unconfirmed `patient_timeline_events` in PostgreSQL, in addition to notifying the Python engine.
+- Upgraded `frontend/app/api/extractions/[id]/route.ts`:
+  - Added a graceful fallback querying PostgreSQL `"Document"` and `"Analysis"` tables to reconstruct the review payload if Python cache expired.
+- Verified in container: unconfirmed drafts display actionable discard/submit buttons; clicking Discard permanently deletes the draft from timeline, overview, and database.
+
+---
+
+### [KI-19] Misleading "Hospital HMS" / "Hospital Verified" provenance attribution on patient-scanned prescriptions — ✅ RESOLVED
+
+**Evidence:**
+- In `frontend/app/api/confirm/[id]/route.ts`, confirming an uploaded prescription inserted a timeline event with:
+  `source = 'Hospital HMS'` and `verification_status = 'Hospital Verified'`.
+- In `frontend/app/api/user/dashboard/route.ts`, documents were transformed into timeline items with:
+  `source: isConfirmed ? "Hospital HMS" : "Diagnostic Lab"` and `verification_status: isConfirmed ? "Hospital Verified" : "Patient Confirmed"`.
+- Timeline event #5 in the production database was explicitly seeded with `source: 'Hospital HMS'` and `verification_status: 'Hospital Verified'`.
+
+**Impact:**
+Prescriptions photographed and uploaded by patients claimed direct hospital electronic health record integration, violating clinical provenance accuracy.
+
+**Fix:**
+- Updated `frontend/app/api/confirm/[id]/route.ts` to attribute confirmed scans truthfully:
+  `source: 'Prescription Scan'`, `reliability: 'High'`, `verification_status: 'Prescription Verified'`, and title prefix `Prescription:`.
+- Updated `frontend/app/api/user/dashboard/route.ts` and `frontend/app/api/patient/timeline/route.ts` to return `source: 'Prescription Scan'` and `verification_status: 'Prescription Verified'` for confirmed prescription scans, and `source: 'Uploaded Document'`, `verification_status: 'Awaiting Review'` for unconfirmed drafts.
+- Sanitized database records (including timeline event #5) to reflect `Prescription Scan` and `Prescription Verified`.
+
+---
+
+### [KI-20] Duplicate "Reports" navigation link highlighting and page scrolling sidebar — ✅ RESOLVED
+
+**Evidence:**
+- In `frontend/app/patient/layout.tsx`, `navItems` contained both `"My Medical Records"` (`/patient/documents`) and `"Reports"` (`/patient/documents`).
+- Navigating to `/patient/documents` caused both sidebar menu items to highlight simultaneously in active teal styling.
+- The sidebar container did not have a fixed height lock, causing the entire navigation sidebar to scroll off-screen when scrolling down long patient records.
+
+**Impact:**
+Confusing navigation UI and poor usability on longer dashboards.
+
+**Fix:**
+- Removed the redundant `"Reports"` item from `navItems` in `frontend/app/patient/layout.tsx`; retained `"My Medical Records"` (`/patient/documents`).
+- Implemented static non-scrolling sidebar: locked the layout root to `h-screen overflow-hidden`, configured `<Sidebar />` with `h-screen sticky top-0`, and wrapped main content in an independent scroll container (`h-screen overflow-y-auto`).
+- Removed unused search input component from `TopHeader` and made breadcrumbs dynamic based on `usePathname()`.
+
+---
+
+### [KI-21] Hardcoded / Malformed user profile and ABHA prefix formatting in sidebar — ✅ RESOLVED
+
+**Evidence:**
+- In `frontend/app/patient/layout.tsx`, the patient profile card rendered `"ABHA: "` followed by `userData.patientId`, but `userData.patientId` was already formatted as `"ABHA: P-594604202"`, producing duplicate `"ABHA: ABHA: P-594604202"`.
+- User ID 40 had the raw uncapitalized username `"arnn"` stored in the PostgreSQL `"User"` table.
+
+**Impact:**
+Unpolished UI with duplicate labels and unformatted patient names.
+
+**Fix:**
+- Updated `frontend/app/patient/layout.tsx` to normalize patient ID display: replaces redundant `"ABHA: "` with standard identifier prefix `"UHID: "` (`UHID: P-594604202`).
+- Updated PostgreSQL database record for user 40 to `"Aryan"`, and added frontend capitalization fallback to capitalize initial letters.
 
 ---
 

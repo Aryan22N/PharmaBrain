@@ -22,7 +22,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 2. User Table (with 9-digit patientId and legacyPatientId for backward compatibility)
+-- 2. User Table (with role, P- patientId, D- doctorId, and doctor verification status)
 CREATE TABLE IF NOT EXISTS "User" (
     id SERIAL PRIMARY KEY,
     "patientId" VARCHAR(32) UNIQUE,
@@ -30,13 +30,42 @@ CREATE TABLE IF NOT EXISTS "User" (
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     "passwordHash" VARCHAR(255) NOT NULL,
-    "createdAt" VARCHAR(64) DEFAULT CURRENT_TIMESTAMP::text
+    "createdAt" VARCHAR(64) DEFAULT CURRENT_TIMESTAMP::text,
+    "role" VARCHAR(32) DEFAULT 'PATIENT' NOT NULL,
+    "doctorId" VARCHAR(32),
+    "doctorVerificationStatus" VARCHAR(32) DEFAULT 'NOT_REQUIRED',
+    "medicalLicenseNumber" VARCHAR(64),
+    "specialization" VARCHAR(120),
+    "hospitalAffiliation" VARCHAR(255),
+    "doctorVerificationNote" TEXT,
+    "doctorVerifiedAt" VARCHAR(64),
+    "doctorVerifiedBy" VARCHAR(120),
+    CONSTRAINT user_role_allowed CHECK (role IN ('PATIENT', 'DOCTOR')),
+    CONSTRAINT user_doctor_verification_status_allowed CHECK ("doctorVerificationStatus" IN ('NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED')),
+    CONSTRAINT user_doctor_id_format CHECK ("doctorId" IS NULL OR "doctorId" LIKE 'D-%'),
+    CONSTRAINT user_patient_id_format CHECK ("patientId" IS NULL OR "patientId" LIKE 'P-%' OR "patientId" ~ '^[0-9]{8,12}$' OR "patientId" ~ '^[A-Za-z0-9_-]{3,32}$'),
+    CONSTRAINT user_doctor_identity_consistent CHECK (
+        (role = 'PATIENT' AND "doctorId" IS NULL AND "doctorVerificationStatus" = 'NOT_REQUIRED')
+        OR
+        (role = 'DOCTOR' AND "doctorId" LIKE 'D-%' AND "doctorVerificationStatus" IN ('PENDING', 'APPROVED', 'REJECTED'))
+    )
 );
 
--- Ensure patientId column exists if table was previously created
+-- Ensure columns and indexes exist if table was previously created
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "patientId" VARCHAR(32);
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "legacyPatientId" VARCHAR(32);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "role" VARCHAR(32) DEFAULT 'PATIENT';
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "doctorId" VARCHAR(32);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "doctorVerificationStatus" VARCHAR(32) DEFAULT 'NOT_REQUIRED';
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "medicalLicenseNumber" VARCHAR(64);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "specialization" VARCHAR(120);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "hospitalAffiliation" VARCHAR(255);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "doctorVerificationNote" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "doctorVerifiedAt" VARCHAR(64);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "doctorVerifiedBy" VARCHAR(120);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_patient_id ON "User"("patientId");
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_doctor_id ON "User"("doctorId") WHERE ("doctorId" IS NOT NULL);
 
 -- 3. Document Table (stores uploaded and confirmed prescriptions & reports)
 CREATE TABLE IF NOT EXISTS "Document" (
@@ -254,4 +283,30 @@ CREATE TABLE IF NOT EXISTS patient_medication_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_patient_med_audit_med_id ON patient_medication_audit(medication_id);
 CREATE INDEX IF NOT EXISTS idx_patient_med_audit_patient ON patient_medication_audit(patient_id);
+
+-- 11. Patient Access Requests Table (Doctor-to-Patient Consent & Authorization)
+CREATE TABLE IF NOT EXISTS patient_access_requests (
+    id SERIAL PRIMARY KEY,
+    doctor_id INTEGER NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+    doctor_code VARCHAR(32) NOT NULL,
+    doctor_name VARCHAR(255) NOT NULL,
+    doctor_specialization VARCHAR(120),
+    doctor_hospital VARCHAR(255),
+    patient_id INTEGER NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+    patient_code VARCHAR(32) NOT NULL,
+    patient_name VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    reason TEXT,
+    requested_at VARCHAR(64) DEFAULT CURRENT_TIMESTAMP::text,
+    responded_at VARCHAR(64),
+    revoked_at VARCHAR(64),
+    expires_at VARCHAR(64),
+    CONSTRAINT access_request_status_check CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED'))
+);
+CREATE INDEX IF NOT EXISTS idx_par_doctor_patient ON patient_access_requests(doctor_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_par_patient_status ON patient_access_requests(patient_id, status);
+CREATE INDEX IF NOT EXISTS idx_par_doctor_status ON patient_access_requests(doctor_id, status);
+CREATE INDEX IF NOT EXISTS idx_par_patient_code ON patient_access_requests(patient_code);
+CREATE INDEX IF NOT EXISTS idx_par_doctor_code ON patient_access_requests(doctor_code);
+
 

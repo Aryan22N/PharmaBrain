@@ -1,33 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { verifyToken } from "@/lib/auth";
+import { requirePatientSession } from "@/lib/serverAuth";
+import { getPatientIds, getPrimaryPatientId } from "@/lib/patientScope";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
+    const { user, payload } = authResult;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const patientIds = getPatientIds(user);
+    const patientId = getPrimaryPatientId(user);
+    if (!patientId || patientIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        events: [],
+        timelineEvents: [],
+        total: 0,
+        conflictsCount: 0,
+      });
     }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const patientId = payload.patientId || "483027156";
-    const patientIds = [patientId, "CCM12578"].filter(Boolean);
 
     // 1. Fetch User's Documents from patient summary
     const documents = await query(
@@ -35,7 +32,8 @@ export async function GET(req: NextRequest) {
               a.summary, a."structuredResult"
        FROM "Document" d
        LEFT JOIN "Analysis" a ON d.id = a."documentId"
-       WHERE d."userId" = $1 OR d."patientId" = ANY($2::text[])
+       WHERE (d."userId" = $1 OR d."patientId" = ANY($2::text[]))
+         AND d.status != 'DISCARDED'
        ORDER BY d."uploadedAt" DESC;`,
       [payload.userId, patientIds]
     );
@@ -47,6 +45,9 @@ export async function GET(req: NextRequest) {
       const facility = sr.hospital || "City Care Medical Centre";
       const doctor = typeof sr.doctor === 'string' ? sr.doctor : sr.doctor?.name || "Consulting Physician";
       const refId = sr.reference_id || `HMS-DOC-${doc.id}`;
+      const extractionId = doc.filePath && doc.filePath.startsWith('/extractions/')
+        ? doc.filePath.replace('/extractions/', '')
+        : doc.id;
 
       let category = "Consultation";
       const nameLower = (doc.originalName || "").toLowerCase();
@@ -64,21 +65,24 @@ export async function GET(req: NextRequest) {
 
       return {
         id: `doc-${doc.id}`,
+        document_id: doc.id,
+        extraction_id: extractionId,
         patient_id: patientId,
         user_id: payload.userId,
         event_date: docDate,
         category,
-        title: doc.originalName || "Clinical Encounter Record",
-        description: doc.summary || "Verified medical record stored in patient electronic health summary.",
-        source: isConfirmed ? "Hospital HMS" : "Diagnostic Lab",
-        reliability: isConfirmed ? "High" : "Medium",
-        verification_status: isConfirmed ? "Hospital Verified" : "Patient Confirmed",
+        title: isConfirmed ? (doc.originalName || "Clinical Encounter Record") : (doc.originalName || "Prescription Scan (Draft)"),
+        description: doc.summary || (isConfirmed ? "Verified medical record stored in patient electronic health summary." : "Prescription scan awaiting patient review and confirmation."),
+        source: isConfirmed ? "Prescription Scan" : "Uploaded Document",
+        reliability: isConfirmed ? "High" : "Pending Review",
+        verification_status: isConfirmed ? "Prescription Verified" : "Awaiting Review",
         facility,
         doctor,
         reference_id: refId,
         is_conflicting: false,
         conflict_details: null,
         created_at: doc.uploadedAt,
+        status: doc.status,
       };
     });
 
@@ -90,7 +94,7 @@ export async function GET(req: NextRequest) {
                 source, reliability, verification_status, facility, doctor, reference_id,
                 is_conflicting, conflict_details, created_at
          FROM patient_timeline_events
-         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
          ORDER BY event_date DESC, id DESC;`,
         [patientIds, payload.userId]
       );
@@ -127,25 +131,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
+    const { user, payload } = authResult;
 
     const body = await req.json().catch(() => ({}));
     const {
@@ -170,7 +160,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const patientId = payload.patientId || "483027156";
+    const patientId = getPrimaryPatientId(user) || payload.patientId || `P-${payload.userId}`;
     const refId = reference_id || `PATIENT-${category.toUpperCase().replace(/\s+/g, "_")}-${Date.now().toString().slice(-6)}`;
     const docName = doctor || `${payload.name || "Patient"} (Self-Report)`;
 

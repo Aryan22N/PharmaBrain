@@ -1,377 +1,1035 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
-  Info,
-  Eye,
-  FileImage,
-  ShieldCheck,
-  AlertTriangle,
-  Upload,
   Calendar,
-  Sparkles,
-  FileText,
+  Upload,
+  HeartPulse,
   Pill,
-  Heart,
+  FileText,
+  AlertCircle,
+  ArrowRight,
+  Shield,
+  TrendingUp,
+  FileCheck,
   CheckCircle2,
+  Stethoscope,
+  ChevronRight,
+  ExternalLink,
+  Plus,
+  Clock,
+  Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { usePatientDashboard } from "@/app/patient/context";
 
-export default function OverviewPage() {
-  const router = useRouter();
-  const { userData, metrics, documents, timelineEvents, recordedMedicines, setSelectedSummaryRecord } = usePatientDashboard();
+// Dynamic SVG Sparkline Generator based on DB history points
+function Sparkline({
+  points,
+  color = "#2F7D78",
+}: {
+  points?: { value: number; date: string }[];
+  color?: string;
+}) {
+  if (!points || points.length === 0) {
+    return (
+      <div className="w-full h-10 flex items-center justify-center">
+        <div className="w-full border-b border-dashed border-[#DCE4ED]" />
+      </div>
+    );
+  }
 
-  const userName = userData?.name || "Patient";
-  const userEmail = userData?.email || "";
-  const patientCode = userData?.patientId ?? userData?.patientCode ?? "";
-  const legacyPatientCode = userData?.legacyPatientId ?? null;
+  if (points.length === 1) {
+    return (
+      <div className="w-full h-10 flex items-center justify-center">
+        <svg className="w-full h-full overflow-visible" fill="none" viewBox="0 0 240 36">
+          <line x1="10" y1="18" x2="230" y2="18" stroke={color} strokeWidth="2" strokeDasharray="4 4" />
+          <circle cx="120" cy="18" r="4.5" fill={color} stroke="white" strokeWidth="2" />
+        </svg>
+      </div>
+    );
+  }
 
-  const conflictingItem = recordedMedicines.find((m: any) => m.is_conflicting) || timelineEvents.find((e: any) => e.is_conflicting);
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  const width = 240;
+  const height = 36;
+  const paddingX = 10;
+  const paddingY = 8;
+
+  const coords = points.map((p, idx) => {
+    const x = paddingX + (idx / (points.length - 1)) * (width - paddingX * 2);
+    // Invert y: higher value is higher up (lower Y)
+    const normalized = (p.value - min) / range;
+    const y = height - paddingY - normalized * (height - paddingY * 2);
+    return { x, y };
+  });
+
+  const pathD = coords.reduce(
+    (acc, pt, idx) => (idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`),
+    ""
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Welcome Banner */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <h2 className="text-2xl font-extrabold text-slate-900">
-              Welcome, {userName}
-            </h2>
-            {legacyPatientCode && (
-              <span className="bg-slate-100 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded border border-slate-200 font-mono">
-                Legacy: {legacyPatientCode}
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-slate-500">
-            Personal Medical Record • Longitudinal Care Summary
-          </p>
-        </div>
+    <div className="w-full h-10 py-1">
+      <svg
+        className="w-full h-full overflow-visible"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox="0 0 240 36"
+      >
+        <path
+          d={pathD}
+          stroke={color}
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {coords.map((pt, idx) => (
+          <circle
+            key={idx}
+            cx={pt.x}
+            cy={pt.y}
+            r={idx === coords.length - 1 ? 4.5 : 3.5}
+            fill={color}
+            stroke="white"
+            strokeWidth="2"
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
 
-        <div className="flex flex-wrap items-center gap-2.5">
+export default function OverviewPage() {
+  const router = useRouter();
+  const {
+    userData,
+    metrics,
+    documents,
+    pendingDocuments,
+    conditions,
+    allergies,
+    vitals,
+    doctorSharing,
+    longitudinalSummary,
+    timelineEvents,
+    recordedMedicines,
+    conflictingMedicines,
+    setSelectedSummaryRecord,
+    setAddAllergyModalOpen,
+    setAddConditionModalOpen,
+  } = usePatientDashboard();
+
+  const conflictingMedsList = React.useMemo(() => {
+    if (conflictingMedicines && conflictingMedicines.length > 0) {
+      return conflictingMedicines;
+    }
+    return (recordedMedicines || []).filter(
+      (m: any) => m.is_conflicting || m.status === "NEEDS_REVIEW"
+    );
+  }, [conflictingMedicines, recordedMedicines]);
+
+  const rawName = userData?.name || "Aryan";
+  const userName = rawName.toLowerCase() === "arnn" ? "Aryan" : rawName.charAt(0).toUpperCase() + rawName.slice(1);
+  const firstName = userName.split(" ")[0];
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 17) return "Good afternoon";
+    return "Good evening";
+  };
+
+  const activeConditionsCount =
+    metrics.activeConditionsCount ??
+    conditions.filter((c) => c.status === "ACTIVE").length;
+
+  const activeMedicinesCount =
+    metrics.activeMeds ??
+    recordedMedicines.filter((m) => m.status === "ACTIVE").length;
+
+  const totalRecordsCount = metrics.totalRecords ?? documents.length;
+
+  const recordsToReviewCount =
+    metrics.recordsToReviewCount ?? pendingDocuments.length;
+
+  const activeMedsList = recordedMedicines
+    .filter((m) => m.status === "ACTIVE")
+    .slice(0, 3);
+
+  const displayTimeline = timelineEvents.slice(0, 4);
+
+  return (
+    <div className="flex flex-col w-full space-y-6 max-w-7xl mx-auto">
+      {/* 1. Header & Welcome Area */}
+      <section className="flex flex-col gap-2">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-[28px] font-bold text-[#111827] tracking-tight">
+              {getGreeting()}, {firstName}
+            </h1>
+            <p className="text-[14px] text-[#64748B]">
+              Here&apos;s an overview of your health records and recent clinical updates.
+            </p>
+          </div>
+
+          {/* Quick Action CTAs */}
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+            <button
+              onClick={() => router.push("/patient/timeline")}
+              className="h-10 px-4 rounded-xl bg-white border border-[#DCE4ED] text-[#2F7D78] hover:text-[#256B66] hover:border-[#A7E9DF] font-semibold text-[13px] shadow-xs hover:bg-[#F7F9FB] transition-all flex items-center gap-2 cursor-pointer"
+              type="button"
+            >
+              <Calendar className="w-[19px] h-[19px] text-[#2F7D78]" />
+              <span>View Health Timeline</span>
+            </button>
+            <button
+              onClick={() => router.push("/upload")}
+              className="h-10 px-4 rounded-xl bg-[#2F7D78] text-white font-semibold text-[13px] shadow-xs hover:bg-[#256B66] transition-all flex items-center gap-2 cursor-pointer"
+              type="button"
+            >
+              <Upload className="w-[19px] h-[19px]" />
+              <span>+ Upload Medical Record</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. Compact Health Overview Cards (4 Columns) */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Active Conditions */}
+        <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-full bg-[#E8F6F4] flex items-center justify-center text-[#2F7D78]">
+              <HeartPulse className="w-[22px] h-[22px]" />
+            </div>
+            <span className="text-[28px] text-[#111827] font-bold">
+              {activeConditionsCount}
+            </span>
+          </div>
+          <div>
+            <h2 className="text-[15px] font-semibold text-[#111827]">Active Conditions</h2>
+            <p className="text-[12px] text-[#64748B] mt-0.5">
+              {activeConditionsCount > 0
+                ? `${activeConditionsCount} active condition${activeConditionsCount > 1 ? "s" : ""}`
+                : "No active conditions recorded"}
+            </p>
+          </div>
           <button
-            onClick={() => router.push("/upload")}
-            className="flex items-center gap-2 bg-[#008080] hover:bg-[#006666] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+            onClick={() => setAddConditionModalOpen(true)}
+            className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 pt-1 font-semibold text-left cursor-pointer"
           >
-            <Upload className="w-4 h-4 stroke-[2.5]" />
-            Upload Document
+            <span>{activeConditionsCount > 0 ? "View & manage conditions" : "+ Add condition"}</span>
+            <ArrowRight className="w-4 h-4" />
           </button>
         </div>
-      </div>
 
-      {/* Dynamic Alert Warning Box — Only shown if real conflicts exist */}
-      {conflictingItem && (
-        <div className="bg-[#fffbeb] border border-[#fef3c7] p-4 rounded-2xl flex items-start gap-3 shadow-xs">
-          <AlertTriangle className="w-5 h-5 text-[#b45309] shrink-0 mt-0.5" />
-          <div className="flex-1 text-xs text-[#92400e]">
-            <h3 className="font-bold text-[#b45309] mb-0.5">
-              Conflicting Clinical Information Detected
-            </h3>
-            <p className="leading-relaxed">
-              {conflictingItem.conflict_details || `A clinical conflict was detected for ${conflictingItem.name || conflictingItem.title}.`}
+        {/* Card 2: Active Medicines */}
+        <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-full bg-[#E8F6F4] flex items-center justify-center text-[#2F7D78]">
+              <Pill className="w-[22px] h-[22px]" />
+            </div>
+            <span className="text-[28px] text-[#111827] font-bold">
+              {activeMedicinesCount}
+            </span>
+          </div>
+          <div>
+            <h2 className="text-[15px] font-semibold text-[#111827]">Active Medicines</h2>
+            <p className="text-[12px] text-[#64748B] mt-0.5">
+              {activeMedicinesCount > 0
+                ? `${activeMedicinesCount} active medicine${activeMedicinesCount > 1 ? "s" : ""}`
+                : "No active medicines"}
             </p>
           </div>
           <Link
-            href="/patient/timeline"
-            className="text-xs font-bold text-[#b45309] hover:underline flex items-center gap-1 shrink-0"
+            href="/patient/medicines"
+            className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 pt-1 font-semibold"
           >
-            Review Discrepancy &rarr;
+            <span>Review medicines</span>
+            <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
-      )}
 
-      {/* 6 Key Dynamic Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {/* 1. Total Records */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-semibold text-slate-500">Total Records</span>
-            <FileText className="w-4 h-4 text-slate-400" />
-          </div>
-          <div>
-            <span className="text-2xl font-extrabold text-slate-900">{metrics.totalRecords}</span>
-            <p className="text-[10px] text-slate-400 mt-0.5">Across Patient EHR</p>
-          </div>
-        </div>
-
-        {/* 2. Hospital Verified */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-semibold text-slate-500">Hospital Verified</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div>
-            <span className="text-2xl font-extrabold text-slate-900">{metrics.hospitalVerified}</span>
-            <p className="text-[10px] text-teal-600 font-medium mt-0.5">Verified EHR</p>
-          </div>
-        </div>
-
-        {/* 3. Active Meds */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-semibold text-slate-500">Active Meds</span>
-            <Pill className="w-4 h-4 text-indigo-500" />
-          </div>
-          <div>
-            <span className="text-2xl font-extrabold text-slate-900">{metrics.activeMeds}</span>
-            <p className="text-[10px] text-slate-400 mt-0.5">Active therapies</p>
-          </div>
-        </div>
-
-        {/* 4. Last HbA1c */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-semibold text-slate-500">Last HbA1c</span>
-            <Activity className="w-4 h-4 text-amber-500" />
-          </div>
-          <div>
-            <span className="text-2xl font-extrabold text-slate-900">{metrics.lastHbA1c}</span>
-            <p className="text-[10px] text-amber-600 font-medium mt-0.5">
-              {metrics.lastHbA1c !== "--" ? "Latest result" : "No lab data"}
-            </p>
-          </div>
-        </div>
-
-        {/* 5. Blood Pressure */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-semibold text-slate-500">Blood Pressure</span>
-            <Heart className="w-4 h-4 text-rose-500" />
-          </div>
-          <div>
-            <div className="text-lg font-extrabold text-slate-900 leading-tight">{metrics.bloodPressure}</div>
-            <p className="text-[10px] text-slate-400 mt-0.5">
-              {metrics.bloodPressure !== "--" ? "Latest reading" : "No BP recorded"}
-            </p>
-          </div>
-        </div>
-
-        {/* 6. History Coverage */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-semibold text-slate-500">History Coverage</span>
-            <CheckCircle2 className="w-4 h-4 text-teal-500" />
-          </div>
-          <div>
-            <span className="text-2xl font-extrabold text-slate-900">{metrics.historyCoverage}</span>
-            <p className="text-[10px] text-teal-600 font-medium mt-0.5">
-              {metrics.totalRecords > 0 ? "Coverage baseline" : "No records yet"}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Overview Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Longitudinal Care Summary & Saved Documents */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-[#008080]" />
-              <h3 className="text-sm font-bold text-slate-900">
-                Longitudinal Care Summary & Saved Documents
-              </h3>
+        {/* Card 3: Medical Records */}
+        <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-full bg-[#F3F6F9] flex items-center justify-center text-[#2F7D78]">
+              <FileText className="w-[22px] h-[22px]" />
             </div>
-            <span className="text-[11px] font-semibold text-slate-500">
-              {documents.length} Records in EHR Database
+            <span className="text-[28px] text-[#111827] font-bold">
+              {totalRecordsCount}
             </span>
           </div>
+          <div>
+            <h2 className="text-[15px] font-semibold text-[#111827]">Medical Records</h2>
+            <p className="text-[12px] text-[#64748B] mt-0.5">
+              {totalRecordsCount > 0 ? `${totalRecordsCount} records` : "No medical records yet"}
+            </p>
+          </div>
+          <Link
+            href="/patient/documents"
+            className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 pt-1 font-semibold"
+          >
+            <span>View all records</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
 
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Summary for patient <strong className="text-slate-800">{userName}</strong>{userEmail ? ` (${userEmail})` : ""}. Integrated with Supabase PostgreSQL and automated document OCR telemetry. Click any record to inspect details.
-          </p>
+        {/* Card 4: Records to Review */}
+        <div className={`bg-white rounded-xl p-5 border shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between space-y-3 ${
+          recordsToReviewCount > 0 ? "border-[#FDE68A]" : "border-[#DCE4ED]"
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+              recordsToReviewCount > 0 ? "bg-[#FFFBEB] text-[#F59E0B]" : "bg-[#E8F6F4] text-[#2F7D78]"
+            }`}>
+              {recordsToReviewCount > 0 ? (
+                <AlertCircle className="w-[22px] h-[22px]" />
+              ) : (
+                <CheckCircle2 className="w-[22px] h-[22px]" />
+              )}
+            </div>
+            <span className={`text-[28px] font-bold ${
+              recordsToReviewCount > 0 ? "text-[#F59E0B]" : "text-[#111827]"
+            }`}>
+              {recordsToReviewCount}
+            </span>
+          </div>
+          <div>
+            <h2 className="text-[15px] font-semibold text-[#111827]">Records to Review</h2>
+            <p className="text-[12px] text-[#64748B] mt-0.5">
+              {recordsToReviewCount > 0
+                ? `${recordsToReviewCount} document${recordsToReviewCount > 1 ? "s" : ""} awaiting review`
+                : "All documents confirmed"}
+            </p>
+          </div>
+          <Link
+            href="/patient/documents"
+            className={`text-[13px] hover:underline inline-flex items-center gap-1 pt-1 font-semibold ${
+              recordsToReviewCount > 0 ? "text-[#92400E]" : "text-[#2F7D78]"
+            }`}
+          >
+            <span>{recordsToReviewCount > 0 ? "Review uploaded records" : "All documents reviewed"}</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </section>
 
-          {/* Documents List or Clean Empty State */}
-          {documents.length === 0 ? (
-            <div className="text-center py-10 px-4 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 space-y-3">
-              <div className="w-12 h-12 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center mx-auto">
-                <FileText className="w-6 h-6" />
+      {/* 3. Asymmetric Dashboard Content (Col 8/12 & Col 4/12) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* LEFT PRIMARY REGION (Col 8/12) */}
+        <div className="lg:col-span-8 space-y-5">
+          {/* A. Active Medicines & My Allergies (Side-by-Side Cards) */}
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Active Medicines Card */}
+            <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Pill className="w-[22px] h-[22px] text-[#2F7D78]" />
+                    <h2 className="text-[17px] font-semibold text-[#111827]">Active Medicines</h2>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-[#E8F6F4] text-[#256B66] text-[11px] font-semibold">
+                    {activeMedicinesCount} Current
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {activeMedsList.length === 0 ? (
+                    <div className="p-4 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 text-center space-y-1">
+                      <p className="text-[12.5px] font-medium text-[#64748B]">
+                        No active medicines recorded in your electronic record.
+                      </p>
+                      <Link
+                        href="/upload"
+                        className="text-[11.5px] text-[#2F7D78] font-semibold hover:underline inline-block pt-1"
+                      >
+                        Upload a prescription to record therapies &rarr;
+                      </Link>
+                    </div>
+                  ) : (
+                    activeMedsList.map((med: any, idx: number) => {
+                      const medSource =
+                        med.source === "Hospital HMS"
+                          ? "Prescription Scan"
+                          : med.source || "Prescription Scan";
+                      return (
+                        <div
+                          key={med.id || idx}
+                          className="p-3 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 space-y-1"
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="text-[13px] text-[#111827] font-semibold">
+                              {med.name} {med.strength}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10.5px] bg-[#E8F6F4] text-[#256B66] font-semibold">
+                              Active
+                            </span>
+                          </div>
+                          <p className="text-[12px] text-[#64748B]">
+                            {med.route || "Oral"} • {med.frequency || "Once daily"}
+                          </p>
+                          <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-[#64748B]">
+                            <FileText className="w-3.5 h-3.5 text-[#2F7D78]" />
+                            <span>
+                              Source: {medSource} ({med.doctor || "Physician"})
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-800">No medical records uploaded yet</h4>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                  Upload your paper prescriptions or lab reports to automatically extract structured clinical data with PaddleOCR.
+
+              <div className="pt-2 border-t border-[#DCE4ED]">
+                <Link
+                  href="/patient/medicines"
+                  className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 font-semibold"
+                >
+                  <span>View All Medicines ({activeMedicinesCount})</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+            </div>
+
+            {/* My Allergies Card */}
+            <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-[22px] h-[22px] text-[#F59E0B]" />
+                    <h2 className="text-[17px] font-semibold text-[#111827]">My Allergies</h2>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-[#FFFBEB] text-[#92400E] text-[11px] font-semibold">
+                    {allergies.length} Documented
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {allergies.length === 0 ? (
+                    <div className="p-4 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 text-center space-y-1">
+                      <p className="text-[12.5px] font-medium text-[#64748B]">
+                        No known drug or food allergies documented in database.
+                      </p>
+                      <button
+                        onClick={() => setAddAllergyModalOpen(true)}
+                        className="text-[11.5px] text-[#2F7D78] font-semibold hover:underline inline-block pt-1 cursor-pointer"
+                      >
+                        + Record an allergy sensitivity &rarr;
+                      </button>
+                    </div>
+                  ) : (
+                    allergies.map((allergy: any, idx: number) => {
+                      const isVerified =
+                        allergy.verification_status === "Clinical Verified" ||
+                        allergy.verification_status === "Hospital Verified" ||
+                        allergy.status === "Clinical Verified" ||
+                        allergy.status === "Hospital Verified";
+                      return (
+                        <div
+                          key={allergy.id || idx}
+                          className="p-3 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 space-y-1"
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="text-[13px] text-[#111827] font-semibold">
+                              {allergy.allergen}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10.5px] bg-[#DCE4ED] text-[#111827] font-medium">
+                              {allergy.category || "Medication"}
+                            </span>
+                          </div>
+                          <p className="text-[12px] text-[#64748B]">
+                            Reaction: {allergy.reaction || "Not documented"}
+                          </p>
+                          <div className="flex items-center justify-between pt-0.5 text-[11px] text-[#64748B]">
+                            {isVerified ? (
+                              <span className="flex items-center gap-1 font-semibold text-[#2F7D78]">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Clinically Verified
+                              </span>
+                            ) : (
+                              <span>Status: {allergy.status || "Patient Reported"}</span>
+                            )}
+                            <span className="font-mono text-[11px]">
+                              Added: {allergy.added_date || "Recorded in EHR"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <p className="text-[11px] leading-tight text-[#64748B] italic pt-0.5">
+                  * Not recorded does not necessarily mean no known allergies. Always verify with your care team.
                 </p>
               </div>
-              <button
-                onClick={() => router.push("/upload")}
-                className="inline-flex items-center gap-2 bg-[#008080] hover:bg-[#006666] text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                Upload First Document
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3 pt-1">
-              {documents.map((doc, idx) => {
-                const docDate =
-                  doc.structuredResult?.date_iso ||
-                  new Date(doc.uploadedAt).toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  });
-                const meds = doc.structuredResult?.medicines || doc.medicines || [];
 
-                return (
-                  <div
-                    key={doc.id || idx}
-                    onClick={() => setSelectedSummaryRecord(doc)}
-                    className="bg-slate-50/80 hover:bg-teal-50/40 p-4 rounded-xl border border-slate-200/80 hover:border-teal-400 hover:shadow-md cursor-pointer transition-all active:scale-[0.99] group flex flex-col md:flex-row md:items-center justify-between gap-4"
-                    role="button"
-                    tabIndex={0}
-                    title="Click to view complete clinical summary"
+              <div className="pt-2 border-t border-[#DCE4ED] flex items-center justify-between gap-2 flex-wrap">
+                <button
+                  onClick={() => setAddAllergyModalOpen(true)}
+                  className="h-7 px-2.5 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED] text-[#2F7D78] hover:bg-[#E8F6F4] text-[11.5px] font-semibold transition-colors cursor-pointer"
+                  type="button"
+                >
+                  Update Allergy Information
+                </button>
+                <button
+                  onClick={() => setAddAllergyModalOpen(true)}
+                  className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 font-semibold cursor-pointer"
+                >
+                  <span>Manage Allergies</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* B. Latest Health Measurements (Vitals & Biomarkers) */}
+          <section className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-[#2F7D78]" />
+                <h2 className="text-[17px] font-semibold text-[#111827]">
+                  Latest Health Measurements
+                </h2>
+              </div>
+              <Link
+                href="/patient/trends"
+                className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 font-semibold"
+              >
+                <span>View Full Trends & Insights</span>
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
+
+            {/* 4 Biomarker Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Card 1: Fasting Glucose */}
+              <div className="p-4 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED]/70 hover:bg-[#F3F6F9]/90 transition-colors space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[14px] font-semibold text-[#111827] block">
+                      Fasting Blood Glucose
+                    </span>
+                    <span className="text-[11.5px] text-[#64748B]">
+                      {vitals.glucose.targetRange}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[20px] text-[#111827] font-bold">
+                      {vitals.glucose.latestValue}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#64748B] block">
+                      {vitals.glucose.date || "No date recorded"}
+                    </span>
+                  </div>
+                </div>
+
+                <Sparkline points={vitals.glucose.history} color="#2F7D78" />
+
+                <div className="flex items-center justify-between pt-1">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                      vitals.glucose.numericValue != null && vitals.glucose.numericValue > 130
+                        ? "bg-[#FFFBEB] text-[#92400E]"
+                        : "bg-[#E8F6F4] text-[#256B66]"
+                    }`}
                   >
-                    <div className="flex items-start gap-3.5 overflow-hidden min-w-0">
-                      <div className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shrink-0 mt-0.5 group-hover:border-teal-400 transition-all shadow-2xs relative">
-                        {doc.imageUrl ? (
-                          <img
-                            src={doc.imageUrl}
-                            alt={doc.filename}
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = "/sample_prescription.png";
-                            }}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-slate-400 bg-slate-100">
-                            <FileImage className="w-5 h-5 text-slate-400" />
-                          </div>
+                    {vitals.glucose.statusLabel}
+                  </span>
+                  <span className="text-[12px] text-[#64748B]">
+                    {vitals.glucose.trendNote}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 2: HbA1c */}
+              <div className="p-4 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED]/70 hover:bg-[#F3F6F9]/90 transition-colors space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[14px] font-semibold text-[#111827] block">
+                      Glycated Hemoglobin (HbA1c)
+                    </span>
+                    <span className="text-[11.5px] text-[#64748B]">
+                      {vitals.hba1c.targetRange}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[20px] text-[#111827] font-bold">
+                      {vitals.hba1c.latestValue}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#64748B] block">
+                      {vitals.hba1c.date || "No date recorded"}
+                    </span>
+                  </div>
+                </div>
+
+                <Sparkline points={vitals.hba1c.history} color="#2F7D78" />
+
+                <div className="flex items-center justify-between pt-1">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                      vitals.hba1c.numericValue != null && vitals.hba1c.numericValue > 7.0
+                        ? "bg-[#FFFBEB] text-[#92400E]"
+                        : "bg-[#E8F6F4] text-[#256B66]"
+                    }`}
+                  >
+                    {vitals.hba1c.statusLabel}
+                  </span>
+                  <span className="text-[12px] text-[#64748B]">
+                    {vitals.hba1c.trendNote}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 3: Blood Pressure */}
+              <div className="p-4 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED]/70 hover:bg-[#F3F6F9]/90 transition-colors space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[14px] font-semibold text-[#111827] block">
+                      Blood Pressure (Systolic / Diastolic)
+                    </span>
+                    <span className="text-[11.5px] text-[#64748B]">
+                      {vitals.bp.targetRange}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[20px] text-[#111827] font-bold">
+                      {vitals.bp.latestValue}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#64748B] block">
+                      {vitals.bp.date || "No date recorded"}
+                    </span>
+                  </div>
+                </div>
+
+                <Sparkline points={vitals.bp.history} color="#2F7D78" />
+
+                <div className="flex items-center justify-between pt-1">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                      vitals.bp.numericValue != null && vitals.bp.numericValue >= 130
+                        ? "bg-[#FFFBEB] text-[#92400E]"
+                        : "bg-[#E8F6F4] text-[#256B66]"
+                    }`}
+                  >
+                    {vitals.bp.statusLabel}
+                  </span>
+                  <span className="text-[12px] text-[#64748B]">
+                    {vitals.bp.trendNote}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 4: Weight & BMI */}
+              <div className="p-4 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED]/70 hover:bg-[#F3F6F9]/90 transition-colors space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[14px] font-semibold text-[#111827] block">
+                      Body Weight & Estimated BMI
+                    </span>
+                    <span className="text-[11.5px] text-[#64748B]">
+                      {vitals.weight.targetRange}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[20px] text-[#111827] font-bold">
+                      {vitals.weight.latestValue}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#64748B] block">
+                      {vitals.weight.date || "No date recorded"}
+                    </span>
+                  </div>
+                </div>
+
+                <Sparkline points={vitals.weight.history} color="#2F7D78" />
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="px-2 py-0.5 rounded-full bg-[#E8F6F4] text-[#256B66] text-[11px] font-semibold">
+                    {vitals.weight.statusLabel}
+                  </span>
+                  <span className="text-[12px] text-[#64748B]">
+                    {vitals.weight.trendNote}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* C. Recent Medical Activity (Bottom of Main Column) */}
+          <section className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-[#2F7D78]" />
+                <h2 className="text-[17px] font-semibold text-[#111827]">
+                  Recent Medical Activity
+                </h2>
+              </div>
+              <Link
+                href="/patient/timeline"
+                className="text-[13px] text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1 font-semibold"
+              >
+                <span>View full timeline ({timelineEvents.length} events)</span>
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
+
+            <div className="space-y-3">
+              {displayTimeline.length === 0 ? (
+                <div className="p-8 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED]/70 text-center space-y-2">
+                  <FileText className="w-8 h-8 text-[#94A3B8] mx-auto" />
+                  <h4 className="text-[13.5px] font-semibold text-[#111827]">
+                    No recent medical events found in database
+                  </h4>
+                  <p className="text-[12px] text-[#64748B] max-w-sm mx-auto">
+                    Upload paper prescriptions or lab reports to populate your medical timeline.
+                  </p>
+                  <button
+                    onClick={() => router.push("/upload")}
+                    className="h-8 px-4 rounded-lg bg-[#2F7D78] text-white text-[12px] font-semibold hover:bg-[#256B66] transition-colors cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Upload Document
+                  </button>
+                </div>
+              ) : (
+                displayTimeline.map((event: any, idx: number) => {
+                  const rawSource = event.source || "";
+                  const sourceClean =
+                    rawSource === "Hospital HMS"
+                      ? "Prescription Scan"
+                      : rawSource || "Prescription Scan";
+                  const isPrescription =
+                    sourceClean === "Prescription Scan" ||
+                    event.category === "Prescription" ||
+                    event.category === "Medication";
+                  const isLab =
+                    event.category === "Lab Result" || event.category === "Lab Report";
+
+                  return (
+                    <div
+                      key={event.id || idx}
+                      className="p-4 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED]/70 hover:bg-[#F3F6F9]/90 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-[11px] text-[#64748B]">
+                            {event.event_date || "Date logged"}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[11px] font-semibold flex items-center gap-1 ${
+                              isPrescription
+                                ? "bg-[#EFF6FF] text-[#1D4ED8]"
+                                : isLab
+                                ? "bg-[#F1F5F9] text-[#475569]"
+                                : "bg-[#FFFBEB] text-[#92400E]"
+                            }`}
+                          >
+                            <FileText className="w-3 h-3" />
+                            {sourceClean}
+                          </span>
+                        </div>
+                        <h3 className="text-[14px] font-semibold text-[#111827]">
+                          {event.title}
+                        </h3>
+                        <p className="text-[12px] text-[#64748B]">
+                          {event.doctor} • {event.facility}
+                        </p>
+                        {event.description && (
+                          <p className="text-[13px] text-[#111827]">
+                            {event.description}
+                          </p>
                         )}
                       </div>
 
-                      <div className="overflow-hidden min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                          <span className="text-xs font-bold text-slate-900 group-hover:text-teal-900 transition-colors truncate">
-                            {doc.filename}
-                          </span>
-                          <span
-                            className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                              doc.status === "CONFIRMED"
-                                ? "bg-teal-50 text-teal-700 border-teal-200"
-                                : "bg-amber-50 text-amber-700 border-amber-200"
-                            }`}
-                          >
-                            {doc.status === "CONFIRMED" ? "Hospital Verified" : "Draft Extraction"}
-                          </span>
-                        </div>
+                      <button
+                        onClick={() => {
+                          const doc = documents.find(
+                            (d) => d.id === event.document_id || `doc-${d.id}` === event.id
+                          );
+                          if (doc) {
+                            setSelectedSummaryRecord(doc);
+                          } else {
+                            router.push("/patient/timeline");
+                          }
+                        }}
+                        className="shrink-0 h-8 px-3 rounded-lg text-[12px] font-semibold transition-colors cursor-pointer bg-white border border-[#DCE4ED] text-[#2F7D78] hover:bg-[#E8F6F4]"
+                        type="button"
+                      >
+                        View Consultation Note
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+        </div>
 
-                        <p className="text-[11px] text-slate-500 truncate mb-1">
-                          {doc.summary || doc.structuredResult?.summary || "Clinical encounter details recorded."}
-                        </p>
+        {/* RIGHT SECONDARY REGION (Col 4/12) */}
+        <aside className="lg:col-span-4 space-y-5">
+          {/* A. Conflicting Medicines Card (from /patient/medicines) */}
+          <section className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-[#D97706]" />
+                <h2 className="text-[17px] font-semibold text-[#111827]">
+                  Conflicting Medicines
+                </h2>
+              </div>
+              <span
+                className={`w-6 h-6 rounded-full font-mono text-[11px] font-bold flex items-center justify-center ${
+                  conflictingMedsList.length > 0
+                    ? "bg-[#F59E0B] text-white"
+                    : "bg-[#E8F6F4] text-[#256B66]"
+                }`}
+              >
+                {conflictingMedsList.length}
+              </span>
+            </div>
 
-                        <div className="flex items-center gap-3 text-[10px] text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-slate-400" />
-                            {docDate}
-                          </span>
-                          <span>•</span>
-                          <span>
-                            Facility:{" "}
-                            <strong className="text-slate-600 font-semibold">
-                              {doc.structuredResult?.hospital || "City Care Medical"}
-                            </strong>
-                          </span>
-                          {meds.length > 0 && (
-                            <>
-                              <span>•</span>
-                              <span className="text-teal-700 font-semibold">
-                                {meds.length} Meds Extracted
-                              </span>
-                            </>
+            <div className="space-y-3">
+              {conflictingMedsList.length === 0 ? (
+                <div className="p-3.5 rounded-xl bg-[#E8F6F4] border border-[#A7E9DF] flex items-center gap-2.5 text-[#111827]">
+                  <CheckCircle2 className="w-4 h-4 text-[#2F7D78] shrink-0" />
+                  <div>
+                    <p className="text-[12.5px] text-[#256B66] font-semibold">
+                      No Medication Conflicts Detected
+                    </p>
+                    <p className="text-[11.5px] text-[#64748B] mt-0.5">
+                      All active prescription regimens and dosages are clinically aligned.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                conflictingMedsList.slice(0, 3).map((med: any, idx: number) => (
+                  <div
+                    key={med.id || idx}
+                    className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] space-y-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-[13.5px] text-[#111827] font-bold">
+                          {med.name}{" "}
+                          {med.strength && (
+                            <span className="text-[#92400E] font-mono text-[12px]">
+                              ({med.strength})
+                            </span>
                           )}
-                        </div>
+                        </h3>
+                        <span className="font-mono text-[11px] text-[#78350F] block mt-0.5">
+                          {med.doctor || "Consulting Physician"} •{" "}
+                          {med.prescription_date || med.start_date || "Active Regimen"}
+                        </span>
                       </div>
+                      <span className="px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#B45309] text-[10.5px] font-extrabold uppercase tracking-wider shrink-0 border border-[#FCD34D]">
+                        Needs Review
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                      <span className="text-xs font-bold text-[#008080] group-hover:underline flex items-center gap-1">
-                        <Eye className="w-3.5 h-3.5" />
-                        View Summary &rarr;
+                    <div className="p-2.5 rounded-lg bg-white/90 border border-[#FDE68A]/70 text-[11.5px] text-[#92400E] leading-relaxed flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-[#D97706] shrink-0 mt-0.5" />
+                      <span>
+                        {med.conflict_details ||
+                          med.reconciliation_notes ||
+                          "Concurrent active treatment or dosage discrepancy detected across clinical encounters."}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 text-[11.5px]">
+                      <span className="text-[11px] text-[#92400E] font-medium font-mono">
+                        {med.reference_id || `MED-${med.id}`}
+                      </span>
+                      <Link
+                        href="/patient/medicines"
+                        className="font-bold text-[#0F766E] hover:text-[#115E59] hover:underline flex items-center gap-1"
+                      >
+                        <span>Resolve in Medicines</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {conflictingMedsList.length > 0 && (
+                <div className="pt-1">
+                  <Link
+                    href="/patient/medicines"
+                    className="w-full h-8.5 rounded-lg bg-[#008080] hover:bg-[#006666] text-white text-[12px] font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>View All {conflictingMedsList.length} Conflicting Medicines</span>
+                  </Link>
+                </div>
+              )}
+
+              {pendingDocuments.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-2 text-[#111827] mt-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileCheck className="w-4 h-4 text-[#0284C7] shrink-0" />
+                    <p className="text-[11.5px] text-[#334155] truncate">
+                      {pendingDocuments.length} document{pendingDocuments.length > 1 ? "s" : ""} awaiting review
+                    </p>
+                  </div>
+                  <Link
+                    href="/patient/documents"
+                    className="text-[11px] font-bold text-[#0284C7] hover:underline shrink-0"
+                  >
+                    Review &rarr;
+                  </Link>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* B. Longitudinal Health Status Summary */}
+          <article className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs space-y-3.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-[#2F7D78]" />
+                <h2 className="text-[17px] font-semibold text-[#111827]">
+                  Longitudinal Health Summary
+                </h2>
+              </div>
+              <span className="text-[11px] text-[#64748B]">Updated Live</span>
+            </div>
+
+            {/* Concise 3-bullet clinical summary */}
+            <ul className="space-y-2 text-[12.5px] text-[#111827] leading-relaxed">
+              <li className="flex items-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D78] mt-2 shrink-0"></span>
+                <span>
+                  <strong>Diagnoses:</strong> {longitudinalSummary.diagnoses}
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D78] mt-2 shrink-0"></span>
+                <span>
+                  <strong>Glycemic Status:</strong> {longitudinalSummary.glycemicStatus}
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D78] mt-2 shrink-0"></span>
+                <span>
+                  <strong>Ongoing Regimen:</strong> {longitudinalSummary.regimen}
+                </span>
+              </li>
+            </ul>
+
+            <div className="pt-2 border-t border-[#DCE4ED] flex flex-col gap-2">
+              <p className="text-[11px] leading-tight text-[#64748B] italic">
+                AI-assisted synthesis is for organizational and explanatory support only. Clinical decisions must be confirmed with your licensed physician.
+              </p>
+              <Link
+                href="/patient/trends"
+                className="text-[12px] text-[#2F7D78] font-semibold hover:underline inline-flex items-center gap-1 pt-1"
+              >
+                <span>View Full Summary & Citations</span>
+                <ArrowRight className="w-[15px] h-[15px]" />
+              </Link>
+            </div>
+          </article>
+
+          {/* C. Sharing with Your Doctor */}
+          <section className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs space-y-3.5">
+            <div className="flex items-center gap-2">
+              <Stethoscope className="w-5 h-5 text-[#2F7D78]" />
+              <h2 className="text-[17px] font-semibold text-[#111827]">
+                Sharing with Your Doctor
+              </h2>
+            </div>
+
+            {doctorSharing ? (
+              <div className="p-3.5 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED] space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-[#2F7D78] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                      {doctorSharing.doctor_name
+                        ?.split(" ")
+                        .filter((p: string) => !p.startsWith("Dr."))
+                        .map((n: string) => n[0])
+                        .join("")
+                        .toUpperCase()
+                        .slice(0, 2) || "MD"}
+                    </div>
+                    <div className="truncate">
+                      <span className="text-[13px] text-[#111827] font-semibold block truncate">
+                        {doctorSharing.doctor_name}
+                      </span>
+                      <span className="text-[11.5px] text-[#64748B] truncate">
+                        {doctorSharing.doctor_specialization || "General Medicine"} • {doctorSharing.doctor_hospital || "Hospital"}
                       </span>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                </div>
 
-        {/* Right Column: How Records Are Prioritized & Actions */}
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-              <Info className="w-4 h-4 text-[#008080]" />
-              <h3 className="text-sm font-bold text-slate-900">
-                Deterministic Record Provenance
-              </h3>
-            </div>
+                <div className="pt-1 space-y-1 text-[12px]">
+                  <div className="flex justify-between text-[#64748B]">
+                    <span>Scope:</span>
+                    <span className="font-medium text-[#111827]">
+                      {doctorSharing.reason || "Full Longitudinal (Labs, Rx, Trends)"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[#64748B]">
+                    <span>Consent Status:</span>
+                    <span className="font-medium text-[#256B66]">
+                      {doctorSharing.status === "APPROVED" ? "Active Consent" : doctorSharing.status}
+                    </span>
+                  </div>
+                </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
-              To guarantee patient safety, this platform applies a clinical provenance hierarchy:
-            </p>
-
-            <div className="space-y-3">
-              <div className="bg-sky-50/70 p-3.5 rounded-xl border border-sky-100 space-y-1">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-sky-900">1. Hospital HMS Records</h4>
-                  <span className="bg-sky-200 text-sky-900 text-[10px] font-extrabold px-2 py-0.5 rounded uppercase">
-                    Highest
+                <div className="pt-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#E8F6F4] text-[#256B66] text-[11px] font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-[#2F7D78]"></span>
+                    <span>
+                      Active Sharing • Consented{" "}
+                      {doctorSharing.expires_at
+                        ? `until ${new Date(doctorSharing.expires_at).toLocaleDateString()}`
+                        : "Longitudinal Access"}
+                    </span>
                   </span>
                 </div>
-                <p className="text-[11px] text-sky-700 leading-relaxed">
-                  Direct EHR/FHIR telemetry with cryptographic certificates. Takes priority in dose or medication conflicts.
-                </p>
               </div>
-
-              <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-100 space-y-1">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-amber-900">2. Patient Scanned Records</h4>
-                  <span className="bg-amber-200 text-amber-900 text-[10px] font-extrabold px-2 py-0.5 rounded uppercase">
-                    Medium
-                  </span>
-                </div>
-                <p className="text-[11px] text-amber-700 leading-relaxed">
-                  External clinic records, prescriptions, and lab printouts verified via PaddleOCR extraction engine.
+            ) : (
+              <div className="p-3.5 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED] space-y-2 text-center">
+                <p className="text-[12.5px] text-[#64748B]">
+                  No doctor currently linked to your patient portal.
                 </p>
+                <Link
+                  href="/patient/sharing"
+                  className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#2F7D78] hover:underline"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Connect with Physician
+                </Link>
               </div>
+            )}
 
-              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-800">3. Manual Patient Entries</h4>
-                  <span className="bg-slate-200 text-slate-800 text-[10px] font-extrabold px-2 py-0.5 rounded uppercase">
-                    Low (History)
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Self-reported symptoms and notes. Maintained for clinical audit history without overriding doctor prescriptions.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Upload CTA */}
-          <div className="bg-gradient-to-br from-[#0f766e] to-[#115e59] p-6 rounded-2xl text-white shadow-md space-y-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-teal-200" />
-              <h4 className="text-sm font-bold">Process New Medical Document</h4>
-            </div>
-            <p className="text-xs text-teal-100 leading-relaxed">
-              Upload paper prescriptions, discharge summaries, or blood tests to extract structured data with PaddleOCR.
-            </p>
-            <Link
-              href="/upload"
-              className="inline-flex items-center gap-2 bg-white text-[#0f766e] text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs hover:bg-teal-50 transition-colors"
+            <button
+              onClick={() => router.push("/patient/sharing")}
+              className="w-full h-9 rounded-lg bg-white border border-[#DCE4ED] text-[#2F7D78] text-[12px] font-semibold hover:bg-[#F3F6F9] transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              type="button"
             >
-              <Upload className="w-4 h-4" />
-              Upload Document Now
-            </Link>
-          </div>
-        </div>
+              <span>Manage Permissions</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </section>
+        </aside>
       </div>
+
+      {/* Bottom Regulatory Disclaimer Footer */}
+      <footer className="pt-4 pb-2 text-center">
+        <p className="text-[11px] text-[#64748B]">
+          HealthRecord AI Patient Clinical Portal • Secure HIPAA & ABDM Compliant Architecture
+        </p>
+      </footer>
     </div>
   );
 }
