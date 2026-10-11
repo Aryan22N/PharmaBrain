@@ -8,7 +8,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
-- 2026-10-11 — Doctor Dashboard (`/doctor/dashboard`) & Patient Directory Lookup:
+- 2026-10-11 — Secure Doctor-to-Patient Access Control, Consent Workflow & Clinical Dossier:
+  - Database Schema & Migration: Applied `scratch/migrations/002_patient_access_requests.sql` creating table `patient_access_requests` with status lifecycle (`PENDING`, `APPROVED`, `REJECTED`, `REVOKED`), timestamps (`requested_at`, `responded_at`, `revoked_at`), and composite lookup indexes.
+  - Doctor Access Request APIs: Implemented `POST /api/doctor/access-requests` to request access to patients using `P-...` IDs, and `GET /api/doctor/access-requests` to view request history and authorization status.
+  - Patient Consent & Sharing APIs: Implemented `GET /api/patient/access-requests` for reviewing requests, `POST /api/patient/access-requests/[id]/respond` for approving/rejecting with IDOR protection (`patient_id = user.id`), and `POST /api/patient/access-requests/[id]/revoke` for immediate revocation.
+  - Doctor Patient Records API: Implemented `GET /api/doctor/patients/[patientId]/records` strictly enforcing database authorization on every call (returns 403 if unrequested, pending, rejected, or revoked). Returns full real clinical dossier: medical summary, documents (with explicit OCR draft vs clinician-confirmed status flags), active medications, lab observations/vitals, and longitudinal trends.
+  - Doctor-Facing Clinical Dossier UI: Built comprehensive clinical dossier page at `/doctor/patients/[patientId]` with 5 clinical views (Overview, Medications, Prescriptions & Scans, Vitals, Trends), patient identity badges, and full authorization locks.
+  - Patient Consent & Sharing UI: Built patient sharing page at `/patient/sharing` with pending request approval/rejection and one-click immediate authorization revocation. Added sidebar link in patient layout.
+  - Doctor Dashboard Updates: Integrated access request dialog and status badges directly into `/doctor/dashboard`.
+  - Security Verification: 10/10 automated tests passed covering unauthorized 403, pending 403, patient approval, authorized 200, immediate revocation 403, and IDOR prevention.
+  - Zero modifications to `model/` folder. Zero fake medical records. Zero client-side trust.
   - Built comprehensive Doctor Dashboard UI matching the project's design system with authenticated doctor profile, persistent database-backed `D-...` ID, verification advisory, and clipboard copying.
   - Implemented server-side patient directory lookup endpoint (`POST /api/doctor/lookup-patient`) guarded by `requireDoctorSession`.
   - Added strict server-side validation of patient ID format (`P-...` format enforcement).

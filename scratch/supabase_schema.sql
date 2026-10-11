@@ -284,3 +284,29 @@ CREATE TABLE IF NOT EXISTS patient_medication_audit (
 CREATE INDEX IF NOT EXISTS idx_patient_med_audit_med_id ON patient_medication_audit(medication_id);
 CREATE INDEX IF NOT EXISTS idx_patient_med_audit_patient ON patient_medication_audit(patient_id);
 
+-- 11. Patient Access Requests Table (Doctor-to-Patient Consent & Authorization)
+CREATE TABLE IF NOT EXISTS patient_access_requests (
+    id SERIAL PRIMARY KEY,
+    doctor_id INTEGER NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+    doctor_code VARCHAR(32) NOT NULL,
+    doctor_name VARCHAR(255) NOT NULL,
+    doctor_specialization VARCHAR(120),
+    doctor_hospital VARCHAR(255),
+    patient_id INTEGER NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+    patient_code VARCHAR(32) NOT NULL,
+    patient_name VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    reason TEXT,
+    requested_at VARCHAR(64) DEFAULT CURRENT_TIMESTAMP::text,
+    responded_at VARCHAR(64),
+    revoked_at VARCHAR(64),
+    expires_at VARCHAR(64),
+    CONSTRAINT access_request_status_check CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED'))
+);
+CREATE INDEX IF NOT EXISTS idx_par_doctor_patient ON patient_access_requests(doctor_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_par_patient_status ON patient_access_requests(patient_id, status);
+CREATE INDEX IF NOT EXISTS idx_par_doctor_status ON patient_access_requests(doctor_id, status);
+CREATE INDEX IF NOT EXISTS idx_par_patient_code ON patient_access_requests(patient_code);
+CREATE INDEX IF NOT EXISTS idx_par_doctor_code ON patient_access_requests(doctor_code);
+
+

@@ -212,3 +212,24 @@ export interface DoctorProfile {
   verifiedBy?: string | null;
 }
 
+export type AccessRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "REVOKED";
+
+export interface PatientAccessRequest {
+  id: number;
+  doctorId: number;
+  doctorCode: string;
+  doctorName: string;
+  doctorSpecialization?: string | null;
+  doctorHospital?: string | null;
+  patientId: number;
+  patientCode: string;
+  patientName: string;
+  status: AccessRequestStatus;
+  reason?: string | null;
+  requestedAt: string;
+  respondedAt?: string | null;
+  revokedAt?: string | null;
+  expiresAt?: string | null;
+}
+
+

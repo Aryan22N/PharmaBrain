@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Stethoscope,
@@ -19,8 +19,13 @@ import {
   AlertTriangle,
   RotateCcw,
   IdCard,
+  Send,
+  ExternalLink,
+  CheckCircle2,
+  XCircle,
+  FileText,
 } from "lucide-react";
-import type { UserAccount } from "@/lib/types";
+import type { UserAccount, PatientAccessRequest } from "@/lib/types";
 
 interface PatientLookupResult {
   id: number;
@@ -34,6 +39,9 @@ interface PatientLookupResult {
 interface AuthorizationInfo {
   hasClinicalAccess: boolean;
   status: string;
+  requestId?: number | null;
+  requestedAt?: string | null;
+  respondedAt?: string | null;
   message: string;
 }
 
@@ -51,6 +59,33 @@ export default function DoctorDashboardPage() {
   const [locatedPatient, setLocatedPatient] = useState<PatientLookupResult | null>(null);
   const [authorizationInfo, setAuthorizationInfo] = useState<AuthorizationInfo | null>(null);
   const [copiedDoctorId, setCopiedDoctorId] = useState(false);
+
+  // Access requests & action state
+  const [requestingAccess, setRequestingAccess] = useState(false);
+  const [requestSuccessMessage, setRequestSuccessMessage] = useState<string | null>(null);
+  const [recentRequests, setRecentRequests] = useState<PatientAccessRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+
+  // Fetch doctor's recent access requests
+  const fetchRecentRequests = useCallback(async () => {
+    try {
+      setLoadingRequests(true);
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/doctor/access-requests", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.requests) {
+          setRecentRequests(data.requests);
+        }
+      }
+    } catch {
+      // Ignore background fetch error
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, []);
 
   // 1. Retrieve doctor profile from server session
   useEffect(() => {
@@ -73,6 +108,7 @@ export default function DoctorDashboardPage() {
         }
 
         setDoctorUser(data.user);
+        fetchRecentRequests();
       } catch {
         router.replace("/auth/doctor/login");
       } finally {
@@ -81,7 +117,7 @@ export default function DoctorDashboardPage() {
     };
 
     fetchDoctorSession();
-  }, [router]);
+  }, [router, fetchRecentRequests]);
 
   // Handle Logout
   const handleLogout = async () => {
@@ -106,6 +142,7 @@ export default function DoctorDashboardPage() {
   const handleLookupPatient = async (e: React.FormEvent) => {
     e.preventDefault();
     const queryId = patientIdInput.trim();
+    setRequestSuccessMessage(null);
 
     // Client-side quick check
     if (!queryId) {
@@ -186,12 +223,56 @@ export default function DoctorDashboardPage() {
     }
   };
 
+  // 3. Handle Clinical Access Request
+  const handleRequestAccess = async () => {
+    if (!locatedPatient) return;
+    try {
+      setRequestingAccess(true);
+      setRequestSuccessMessage(null);
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/doctor/access-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          patientId: locatedPatient.patientId,
+          reason: "Clinical consultation and prescription review",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to submit access request.");
+        return;
+      }
+
+      setRequestSuccessMessage(data.message || "Access request submitted to patient!");
+      setAuthorizationInfo({
+        hasClinicalAccess: data.status === "APPROVED",
+        status: data.status,
+        message: data.status === "APPROVED"
+          ? "Clinical authorization active. You are authorized to review this patient medical dossier."
+          : "Access request is currently pending patient review.",
+      });
+
+      // Refresh doctor access requests table
+      fetchRecentRequests();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to submit request.");
+    } finally {
+      setRequestingAccess(false);
+    }
+  };
+
   const handleResetLookup = () => {
     setPatientIdInput("");
     setLookupState("idle");
     setErrorMessage(null);
     setLocatedPatient(null);
     setAuthorizationInfo(null);
+    setRequestSuccessMessage(null);
   };
 
   if (initialLoading) {
@@ -321,8 +402,8 @@ export default function DoctorDashboardPage() {
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <p>
                 <strong className="text-white">Credentials Review Pending:</strong> Your account registration has been
-                recorded. State Medical Council validation is currently processing. You can perform patient identity
-                lookups; clinical medical record inspection remains locked until clinical authorization is active.
+                recorded. State Medical Council validation is currently processing. You can request patient access; full
+                clinical record review requires confirmed patient consent.
               </p>
             </div>
           )}
@@ -339,8 +420,8 @@ export default function DoctorDashboardPage() {
             </div>
             <p className="text-xs text-slate-500">
               Query registered patient accounts by their official permanent identifier starting with{" "}
-              <code className="bg-slate-100 text-slate-800 px-1 py-0.5 rounded font-mono font-bold">P-</code> to check
-              identity status.
+              <code className="bg-slate-100 text-slate-800 px-1 py-0.5 rounded font-mono font-bold">P-</code> to review
+              identity and request consent.
             </p>
           </div>
 
@@ -496,11 +577,18 @@ export default function DoctorDashboardPage() {
             {/* 7. SUCCESS STATE (PATIENT FOUND IN REAL DB) */}
             {lookupState === "success" && locatedPatient && (
               <div className="space-y-4">
+                {requestSuccessMessage && (
+                  <div className="rounded-xl border border-teal-200 bg-teal-50 p-4 text-xs font-bold text-teal-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+                    <span>{requestSuccessMessage}</span>
+                  </div>
+                )}
+
                 {/* Patient Identity Confirmation Card */}
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-3.5">
-                      <div className="w-12 h-12 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-lg shadow-xs shrink-0">
+                      <div className="w-12 h-12 rounded-xl bg-teal-700 text-white flex items-center justify-center font-bold text-lg shadow-xs shrink-0">
                         {locatedPatient.name
                           .split(" ")
                           .map((n) => n[0])
@@ -510,9 +598,9 @@ export default function DoctorDashboardPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <h3 className="text-base font-bold text-slate-900">{locatedPatient.name}</h3>
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                            Registered in Directory
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
+                            <ShieldCheck className="w-3 h-3 text-teal-600" />
+                            Directory Verified
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 font-mono mt-0.5">
@@ -540,36 +628,194 @@ export default function DoctorDashboardPage() {
                   </div>
                 </div>
 
-                {/* Medical Information Protection & Authorization Lock Card */}
-                <div className="rounded-xl border border-amber-200 bg-linear-to-br from-amber-50 to-orange-50/30 p-6 space-y-3">
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0">
-                      <Lock className="w-5 h-5 text-amber-700" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-amber-950 flex items-center gap-2">
-                        <span>Clinical Medical Information Locked</span>
-                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-200/80 text-amber-900">
-                          Authorization Required
-                        </span>
-                      </h4>
-                      <p className="text-xs text-amber-900/90 mt-1 leading-relaxed">
-                        {authorizationInfo?.message ||
-                          "In compliance with healthcare privacy safeguards, prescription records, lab observations, longitudinal trends, and medication timelines remain protected. Clinical data is hidden until patient consent or transfer authorization is verified."}
-                      </p>
-                    </div>
-                  </div>
+                {/* Authorization Status & Action Card */}
+                {authorizationInfo?.hasClinicalAccess ? (
+                  // Authorized State Card
+                  <div className="rounded-xl border border-emerald-200 bg-linear-to-br from-emerald-50 to-teal-50/40 p-6 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-emerald-950">
+                              Clinical Access Authorized by Patient
+                            </h4>
+                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-200 text-emerald-900">
+                              Active
+                            </span>
+                          </div>
+                          <p className="text-xs text-emerald-900/90 mt-1">
+                            {authorizationInfo.message || "You have authorized clinical access to inspect medical history, prescriptions, and longitudinal health trends."}
+                          </p>
+                        </div>
+                      </div>
 
-                  <div className="bg-white/70 border border-amber-200/60 rounded-lg p-3 text-[11px] text-amber-900 flex items-center justify-between gap-4">
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      Medical details hidden by server authorization policy. No unconsented records loaded.
-                    </span>
-                    <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider shrink-0 bg-amber-100 px-2 py-0.5 rounded">
-                      Zero Unauthorized Exposure
-                    </span>
+                      <button
+                        onClick={() => router.push(`/doctor/patients/${locatedPatient.patientId}`)}
+                        className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs shrink-0"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>View Patient Medical Dossier</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  // Locked / Pending / Revoked State Card
+                  <div className="rounded-xl border border-amber-200 bg-linear-to-br from-amber-50 to-orange-50/30 p-6 space-y-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0">
+                        <Lock className="w-5 h-5 text-amber-700" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-sm font-bold text-amber-950">Clinical Medical Information Locked</h4>
+                          <span
+                            className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${
+                              authorizationInfo?.status === "PENDING"
+                                ? "bg-amber-200 text-amber-900"
+                                : authorizationInfo?.status === "REVOKED"
+                                ? "bg-rose-200 text-rose-900"
+                                : "bg-slate-200 text-slate-800"
+                            }`}
+                          >
+                            {authorizationInfo?.status || "Authorization Required"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-amber-900/90 mt-1 leading-relaxed">
+                          {authorizationInfo?.message ||
+                            "In compliance with healthcare privacy safeguards, prescription records, lab observations, longitudinal trends, and medication timelines remain protected. Clinical data is hidden until patient consent or transfer authorization is verified."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-amber-200/60">
+                      <span className="text-[11px] text-amber-800 flex items-center gap-1.5 font-medium">
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        Protected medical records cannot be accessed without patient authorization.
+                      </span>
+
+                      {authorizationInfo?.status === "PENDING" ? (
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold border border-amber-200">
+                          <Clock className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Request Pending Patient Review</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleRequestAccess}
+                          disabled={requestingAccess}
+                          className="px-4 py-2 bg-amber-700 hover:bg-amber-800 disabled:bg-amber-400 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-2xs"
+                        >
+                          {requestingAccess ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Submitting Request...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-3.5 h-3.5" />
+                              <span>Request Clinical Access</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Recent Consultations & Access Requests Panel */}
+        <section className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Patient Access Requests & Active Consultations</h2>
+              <p className="text-xs text-slate-500">
+                Audit trail of clinical access requests initiated from your doctor account.
+              </p>
+            </div>
+            <button
+              onClick={fetchRecentRequests}
+              className="text-xs text-teal-700 hover:text-teal-900 font-semibold flex items-center gap-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <div className="p-6">
+            {loadingRequests ? (
+              <div className="py-8 text-center text-xs text-slate-400">Loading access records...</div>
+            ) : recentRequests.length === 0 ? (
+              <div className="py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <p className="text-xs text-slate-500 font-medium">No clinical access requests on record yet.</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Use the directory search above to find patients and request clinical consultation access.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-400 uppercase tracking-wider font-bold text-[10px]">
+                      <th className="py-3 px-3">Patient</th>
+                      <th className="py-3 px-3">Patient ID</th>
+                      <th className="py-3 px-3">Status</th>
+                      <th className="py-3 px-3">Requested At</th>
+                      <th className="py-3 px-3">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {recentRequests.map((req) => (
+                      <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-3 font-bold text-slate-900">{req.patientName}</td>
+                        <td className="py-3 px-3 font-mono text-slate-600">{req.patientCode}</td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              req.status === "APPROVED"
+                                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                : req.status === "PENDING"
+                                ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                : req.status === "REVOKED"
+                                ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                : "bg-slate-100 text-slate-800"
+                            }`}
+                          >
+                            {req.status === "APPROVED" && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                            {req.status === "PENDING" && <Clock className="w-3 h-3 text-amber-600" />}
+                            {req.status === "REVOKED" && <XCircle className="w-3 h-3 text-rose-600" />}
+                            {req.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-slate-500">
+                          {new Date(req.requestedAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </td>
+                        <td className="py-3 px-3">
+                          {req.status === "APPROVED" ? (
+                            <button
+                              onClick={() => router.push(`/doctor/patients/${req.patientCode}`)}
+                              className="px-3 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-2xs"
+                            >
+                              <span>View Records</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">Access locked</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

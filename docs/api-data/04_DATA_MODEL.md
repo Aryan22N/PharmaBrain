@@ -366,6 +366,31 @@ The Python service calls `md_.create_all(engine)` at startup — tables are crea
 
 ---
 
+## Patient Access Requests Table (Consent & Access Control)
+
+Table: `patient_access_requests` (snake_case, managed in Supabase PostgreSQL).  
+Tracks doctor-to-patient consent requests, approvals, rejections, and revocations.
+
+| Column | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `SERIAL PRIMARY KEY` | No | Unique access request ID |
+| `doctor_id` | `INTEGER REFERENCES "User"(id)` | No | User ID of the requesting doctor |
+| `doctor_code` | `VARCHAR(32)` | No | Persistent doctor identifier (`D-...`) |
+| `doctor_name` | `VARCHAR(255)` | No | Full name of the doctor |
+| `doctor_specialization` | `VARCHAR(120)` | Yes | Doctor's specialty |
+| `doctor_hospital` | `VARCHAR(255)` | Yes | Doctor's hospital affiliation |
+| `patient_id` | `INTEGER REFERENCES "User"(id)` | No | User ID of the target patient |
+| `patient_code` | `VARCHAR(32)` | No | Persistent patient identifier (`P-...`) |
+| `patient_name` | `VARCHAR(255)` | No | Full name of the patient |
+| `status` | `VARCHAR(32)` | No | Request status: `PENDING`, `APPROVED`, `REJECTED`, `REVOKED` |
+| `reason` | `TEXT` | Yes | Clinical consultation note or request reason |
+| `requested_at` | `VARCHAR(64)` | Yes | ISO timestamp when request was initiated |
+| `responded_at` | `VARCHAR(64)` | Yes | ISO timestamp when patient approved or rejected |
+| `revoked_at` | `VARCHAR(64)` | Yes | ISO timestamp when patient revoked access |
+| `expires_at` | `VARCHAR(64)` | Yes | Optional authorization expiration timestamp |
+
+---
+
 ## PLANNED — Future Tables
 
 | Table | Purpose | Status |
@@ -374,3 +399,4 @@ The Python service calls `md_.create_all(engine)` at startup — tables are crea
 | `ingredients` | Active salt mapping: `drug_id`, `salt_name`, `atc_code`, `strength_text` | PLANNED |
 | `medicine_aliases` | OCR error aliases, brand variants | PLANNED |
 | `medicine_ingredients` | Many-to-many: `medicine_id`, `ingredient_id`, `strength_mg` | PLANNED |
+

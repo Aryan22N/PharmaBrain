@@ -79,9 +79,37 @@ export async function POST(req: NextRequest) {
 
     const patient = rows[0];
 
-    // 6. Return verified identity with medical records locked pending authorization
-    // In strict compliance with healthcare safety rules: medical records are kept hidden
-    // until doctor-to-patient access consent is explicitly established.
+    // 6. Check existing doctor-patient authorization in database
+    const accessRows = await query<{
+      id: number;
+      status: string;
+      requested_at: string;
+      responded_at: string | null;
+      revoked_at: string | null;
+    }>(
+      `SELECT id, status, requested_at, responded_at, revoked_at
+       FROM patient_access_requests
+       WHERE doctor_id = $1 AND patient_id = $2
+       ORDER BY id DESC
+       LIMIT 1;`,
+      [doctorUser.id, patient.id]
+    );
+
+    const latestAccess = accessRows[0];
+    const isApproved = latestAccess?.status === 'APPROVED';
+    const authStatus = latestAccess ? latestAccess.status : 'NOT_REQUESTED';
+
+    let authMessage = 'Patient identity verified in hospital registry. Full medical history, active prescriptions, and health trends are protected and remain locked until patient consent or transfer authorization is confirmed.';
+    if (authStatus === 'APPROVED') {
+      authMessage = 'Clinical authorization active. You are authorized to review this patient medical dossier.';
+    } else if (authStatus === 'PENDING') {
+      authMessage = 'Clinical access request is currently pending patient review and consent.';
+    } else if (authStatus === 'REJECTED') {
+      authMessage = 'Clinical access request was declined by the patient.';
+    } else if (authStatus === 'REVOKED') {
+      authMessage = 'Previously granted clinical access has been revoked by the patient.';
+    }
+
     return NextResponse.json({
       success: true,
       doctor: {
@@ -98,10 +126,12 @@ export async function POST(req: NextRequest) {
         status: 'REGISTERED_IN_DIRECTORY',
       },
       authorization: {
-        hasClinicalAccess: false,
-        status: 'LOCKED_PENDING_PATIENT_CONSENT',
-        message:
-          'Patient identity verified in hospital registry. Full medical history, active prescriptions, and health trends are protected and remain locked until patient consent or transfer authorization is confirmed.',
+        hasClinicalAccess: isApproved,
+        status: authStatus,
+        requestId: latestAccess?.id || null,
+        requestedAt: latestAccess?.requested_at || null,
+        respondedAt: latestAccess?.responded_at || null,
+        message: authMessage,
       },
     });
   } catch (error: unknown) {
