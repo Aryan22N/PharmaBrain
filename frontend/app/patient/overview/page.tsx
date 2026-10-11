@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   Stethoscope,
   ChevronRight,
-  HelpCircle,
   ExternalLink,
   Plus,
   Clock,
@@ -136,7 +135,8 @@ export default function OverviewPage() {
     );
   }, [conflictingMedicines, recordedMedicines]);
 
-  const userName = userData?.name || "Patient";
+  const rawName = userData?.name || "Aryan";
+  const userName = rawName.toLowerCase() === "arnn" ? "Aryan" : rawName.charAt(0).toUpperCase() + rawName.slice(1);
   const firstName = userName.split(" ")[0];
 
   const getGreeting = () => {
@@ -1021,19 +1021,6 @@ export default function OverviewPage() {
               <ChevronRight className="w-4 h-4" />
             </button>
           </section>
-
-          {/* D. Patient Care Helpline Notice */}
-          <div className="p-4 rounded-xl bg-[#F3F6F9] border border-[#DCE4ED] text-[#64748B] space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[13px] text-[#2F7D78] font-semibold">
-              <HelpCircle className="w-[18px] h-[18px]" />
-              <span>Need interpretative assistance?</span>
-            </div>
-            <p className="text-[12px] leading-relaxed">
-              Always consult your physician before altering medication regimens. Emergency helpline:{" "}
-              <strong className="text-[#111827]">112</strong> / Hospital Desk:{" "}
-              <strong className="text-[#111827]">+91 22 5550 1200</strong>.
-            </p>
-          </div>
         </aside>
       </div>
 

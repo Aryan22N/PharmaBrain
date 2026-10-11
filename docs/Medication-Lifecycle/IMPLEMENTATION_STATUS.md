@@ -32,6 +32,7 @@
 | **3-Section UI Dashboard** | Current Medicines, Medical History, Needs Review | Complete | `frontend/app/patient/medicines/page.tsx` |
 | **Inspection Modal** | View source prescription scan and clinician details | Complete | Source prescription viewer modal anchored to Supabase Storage |
 | **Prescription Image Scan & Zoom** | Original prescription image, click-to-view, and high-res link | Complete | `inspectModal` preview with hover zoom, new-tab viewer, and fallback in `page.tsx` |
+| **Conflicting Medicines Overview Card** | Replaced empty review card on patient overview with real conflicting medicines card | Complete | `frontend/app/patient/overview/page.tsx` linked to `conflictingMedicines` API |
 
 ---
 

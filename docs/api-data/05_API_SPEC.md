@@ -376,15 +376,16 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | Route | Method | Proxies to Python | Notes |
 |---|---|---|---|
 | `/api/ocr` | POST | `POST /ocr` | Uploads image to Supabase Storage Bucket (`OCR_Images/uploads/`), checks SHA256 duplicate image hash, creates `Document` & `Analysis` records, returns `image_url` |
-| `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, mirrors vitals to `observations` table |
-| `/api/discard/[id]` | POST | `POST /discard/{id}` | Discards draft extraction and marks `Document.status = 'DISCARDED'` |
-| `/api/extractions/[id]` | GET | `GET /extractions/{id}` | Fetches pending extraction draft |
+| `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, marks `source = 'Prescription Scan'`, `verification_status = 'Prescription Verified'`, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, mirrors vitals to `observations` table |
+| `/api/discard/[id]` | POST | `POST /discard/{id}` | Purges draft from PostgreSQL (`Document`, `Analysis`, and unconfirmed `patient_timeline_events`), and notifies Python backend |
+| `/api/extractions/[id]` | GET | `GET /extractions/{id}` | Fetches extraction draft from Python backend, with resilient fallback to PostgreSQL `Document` & `Analysis` tables if Python memory cache has expired |
 | `/api/extractions` | GET | `GET /extractions` | Lists recent extractions |
 | `/api/raw-ocr/[id]` | GET | `GET /raw_ocr/{id}` | Fetches raw bounding boxes and line coordinates |
 | `/api/structure/[id]` | POST | `POST /structure/{id}` | Re-triggers LLM structuring on stored raw OCR |
 | `/api/patients/[id]/prescriptions` | GET | `GET /patients/{id}/prescriptions` | Fetches confirmed prescriptions for patient |
 | `/api/patients/[id]/observations` | GET | `GET /patients/{id}/observations` | Fetches vital observations time-series |
 | `/api/patient/trends` | GET | `POST /patients/{patient_id}/trends_summary` | Evaluates longitudinal statistical trends (AHA/ACC BP, ADA glucose), deltas, and Gemini AI patient narrative |
+| `/api/patient/timeline` | GET | — | Returns unified chronological timeline with draft indicators (`Prescription Scan (Draft)`, `Awaiting Review`, `Pending Review`) for unconfirmed records and verified badges for confirmed records |
 | `/api/patient/medicines` | GET, POST | — | Longitudinal medication lifecycle management. GET synchronizes and returns only medication records belonging to the authenticated patient’s canonical or legacy patient ID (and that patient’s user ID), with resolved high-res prescription scan URLs. POST creates a manual course for the authenticated patient. |
 | `/api/patient/medicines/[id]` | PATCH, PUT | — | PATCH transitions lifecycle status (`COMPLETED`, `ON_HOLD`, `DISCONTINUED`, `ACTIVE`) with mandatory clinical reason. PUT resolves review conflicts. Writes audit log. |
 | `/uploads/[...slug]` | GET | — | Dynamic high-res image serving route for prescription scans; checks `/public/uploads/` with transparent fallback to `/sample_prescription.png`. |
@@ -392,7 +393,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | `/api/auth` | POST | — | Login/register, returns JWT cookie |
 | `/api/user` | GET | — | Current user info from DB |
 | `/api/user/onboarding` | POST, GET | — | Saves & retrieves patient initial profile context (`patient_onboarding` table) |
-| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, and confirmed/pending documents with resolved public Supabase Storage `imageUrl` |
+| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl` |
 | `/api/user/save-ocr` | POST | — | Direct helper to persist confirmed OCR payload into `Document` and `Analysis` tables |
 
 ---

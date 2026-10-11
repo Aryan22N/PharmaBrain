@@ -199,3 +199,72 @@ Use Supabase Storage Cloud Bucket (`OCR_Images/uploads/`) with public CDN URLs a
 - Eliminates ephemeral file loss during Docker container recreation.
 - Medical document images are publicly accessible via their cryptographic random-timestamped URL; access policies can be tightened to private signed tokens if regulatory posture changes.
 
+---
+
+## ADR-010 — Real-Time Database Synthesis for Longitudinal Clinical Summaries
+
+**Date:** 2026-10-11  
+**Status:** Accepted
+
+**Context:**  
+The Clinical Overview dashboard (`/patient/overview`) displays a prominent "Longitudinal Health Summary" card highlighting Diagnoses, Glycemic Status, and Ongoing Regimen. There was ambiguity about whether these summaries were hardcoded mock text or backed by real health data.
+
+**Decision:**  
+All fields in the Longitudinal Health Summary are synthesized in real-time on every request in `frontend/app/api/user/dashboard/route.ts` directly from active PostgreSQL tables:
+1. **Diagnoses:** Queried from `conditions` table where `status = 'ACTIVE'`. If empty, returns `"No active clinical conditions diagnosed or recorded in health record."`
+2. **Glycemic Status:** Calculated from latest `observations` table entries for `hba1c` and `sugar_fasting`/`sugar_random`. If biomarkers are absent, returns `"Glycemic biomarkers not yet documented in laboratory history."`
+3. **Ongoing Regimen:** Synthesized from `recordedMedicines` where `status = 'ACTIVE'`. If empty, returns `"No ongoing pharmacotherapy recorded."`
+
+**Evidence:** Confirmed — `frontend/app/api/user/dashboard/route.ts` lines 435–458.
+
+**Consequences:**
+- Eliminates hardcoded placeholder text entirely.
+- Real patient data immediately updates the overview upon prescription confirmation or status change.
+- Safe, non-diagnostic clinical fallback statements are preserved when records are sparse.
+
+---
+
+## ADR-011 — Patient Prescription Draft Discard & Review Recovery Lifecycle
+
+**Date:** 2026-10-11  
+**Status:** Accepted
+
+**Context:**  
+When patients uploaded prescriptions, PaddleOCR and Gemini immediately produced drafts stored in `"Document"` and `"Analysis"`. If the patient navigated away (e.g. clicking "Health Timeline" in the sidebar) before confirming, the extraction was orphaned as an unconfirmed draft. On the timeline, it appeared as an ordinary clinical encounter with no draft indicator or recovery action, and patients could not discard it. Furthermore, if the Python backend in-memory cache cleared, opening the review page caused 404 errors.
+
+**Decision:**  
+Implement an explicit, resilient draft review and discard lifecycle:
+1. **Timeline Demarcation:** Unconfirmed drafts are visibly badged on `/patient/timeline` as `Awaiting Review` / `Unsaved Draft` with a dedicated top notification banner.
+2. **Inline Patient Actions:** Each draft timeline event displays actionable **"Discard Draft"** and **"Review & Submit"** buttons.
+3. **Cascade Discard API (`POST /api/discard/[id]`):** Completely removes the discarded extraction from PostgreSQL (`"Document"`, `"Analysis"`, and unconfirmed `patient_timeline_events`), preventing phantom drafts from lingering on the dashboard or timeline.
+4. **Resilient Extractions Fallback (`GET /api/extractions/[id]`):** If the Python backend in-memory cache has expired, the route queries PostgreSQL `"Document"` and `"Analysis"` to reconstruct the extraction record, preventing review page 404 failures.
+
+**Evidence:** Confirmed — `frontend/app/api/discard/[id]/route.ts`, `frontend/app/api/extractions/[id]/route.ts`, `frontend/app/patient/timeline/page.tsx`, `frontend/app/patient/documents/[id]/page.tsx`.
+
+**Consequences:**
+- Patients have complete control over draft lifecycles.
+- Accidental navigation away from review is fully recoverable.
+- Database remains clean and free of orphaned unconfirmed drafts.
+
+---
+
+## ADR-012 — Strict Demarcation of Scanned Prescriptions vs Direct Hospital HMS Provenance
+
+**Date:** 2026-10-11  
+**Status:** Accepted
+
+**Context:**  
+Confirmed prescriptions scanned or uploaded by patients were previously inserted into the timeline with `source = 'Hospital HMS'` and `verification_status = 'Hospital Verified'`. This misrepresented patient-uploaded paper scans as authentic, direct hospital electronic health management system integrations.
+
+**Decision:**  
+Enforce strict provenance attribution across all API routes, database records, and UI displays:
+1. Confirmed prescriptions scanned by patients are labeled `source = 'Prescription Scan'` and `verification_status = 'Prescription Verified'`.
+2. Unconfirmed drafts are labeled `source = 'Uploaded Document'` and `verification_status = 'Awaiting Review'`.
+3. The `Hospital HMS` source and `Hospital Verified` status are strictly reserved for authentic hospital EHR/HMS system integrations.
+
+**Evidence:** Confirmed — `frontend/app/api/confirm/[id]/route.ts`, `frontend/app/api/user/dashboard/route.ts`, `frontend/app/api/patient/timeline/route.ts`.
+
+**Consequences:**
+- Clinicians and patients can reliably distinguish between hospital-integrated records and patient-scanned physical documents.
+- Protects clinical audit integrity.
+

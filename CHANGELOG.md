@@ -8,6 +8,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-12 — Unconfirmed Prescription Review/Discard Lifecycle, Accurate Provenance Attribution, and UI Refinements:
+  - **Prescription Draft Discard & Review Flow**:
+    - Added top alert notification and inline draft callout cards on `/patient/timeline` for unconfirmed OCR prescriptions (`Prescription Scan (Draft)`, `Awaiting Review`, `Unsaved Draft`).
+    - Implemented **"Discard Draft"** and **"Review & Submit"** actions allowing patients to discard abandoned drafts or navigate to complete confirmation.
+    - Updated `POST /api/discard/[id]` to cascade-delete matching rows from PostgreSQL `"Document"`, `"Analysis"`, and unconfirmed `patient_timeline_events` in addition to notifying Python backend.
+    - Updated `GET /api/extractions/[id]` with resilient PostgreSQL `"Document"` and `"Analysis"` fallback so draft reviews never 404 when Python backend in-memory cache expires.
+    - Maintained sticky bottom review/discard action bar on `/patient/documents/[id]`.
+  - **Accurate Provenance & Verification Attribution**:
+    - Sanitized timeline and medication provenance writes across `POST /api/confirm/[id]`, `GET /api/user/dashboard`, and `GET /api/patient/timeline`: replaced misleading `Hospital HMS` / `Hospital Verified` attribution on scanned prescriptions with `Prescription Scan` and `Prescription Verified`.
+    - Sanitized historical database records (including timeline event #5) to remove inaccurate hospital system integration claims.
+  - **Conflicting Medicines Card on Patient Overview**:
+    - Replaced empty/redundant "Review Uploaded Records" card on `/patient/overview` with live **"Conflicting Medicines"** card displaying courses with `is_conflicting` or `NEEDS_REVIEW` flags from the generalized lifecycle engine, linking directly to `/patient/medicines`.
+  - **Dynamic Longitudinal Health Summary Synthesis**:
+    - Verified and documented real-time database synthesis of the "Longitudinal Health Summary" card on `/patient/overview` in `GET /api/user/dashboard` querying `conditions` (active diagnoses), `observations` (latest HbA1c and glucose), and `recordedMedicines` (active therapies).
+  - **Navigation & Layout Polish**:
+    - Removed redundant `"Reports"` navigation item from `frontend/app/patient/layout.tsx` to fix duplicate active highlighting when viewing `/patient/documents`.
+    - Implemented static non-scrolling sidebar (`h-screen sticky top-0`) with independent main content scroll container (`h-screen overflow-y-auto`).
+    - Removed unused search input and state from `TopHeader`, and made breadcrumbs dynamic based on `usePathname()`.
+    - Fixed duplicate ABHA prefix (`"ABHA: ABHA: P-..."` normalized to `"UHID: P-..."`).
+    - Normalized patient profile name in PostgreSQL user 40 from `"arnn"` to `"Aryan"`.
+    - Removed helpline card from patient overview sidebar.
+
 - 2026-10-11 — Multi-Tenant Patient Medication Isolation & Zero-State Fix:
   - **Issue Resolved**: Newly registered and logged-in patient accounts navigating to `/patient/medicines` were incorrectly displaying all medications (29+ entries) in the database even without uploading or confirming any prescriptions.
   - **Root Causes**:
