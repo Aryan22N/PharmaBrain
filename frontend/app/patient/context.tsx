@@ -2,9 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 
-const DEMO_JWT =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImVtYWlsIjoicmFodWwuc2hhcm1hQGV4YW1wbGUuY29tIiwibmFtZSI6IlJhaHVsIFNoYXJtYSIsImlhdCI6MTc5MTEyNTc5NSwiZXhwIjoxNzkxNzMwNTk1fQ.GQqUJVwTFcCM45qS1S11Ab8yiZuSFxYnhBwVDOlUvS0";
-
 export interface DashboardMetrics {
   totalRecords: number;
   hospitalVerified: number;
@@ -123,12 +120,12 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      let token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
       if (!token) {
         if (typeof window !== "undefined") {
-          localStorage.setItem("auth_token", DEMO_JWT);
+          window.location.href = "/auth/patient/login";
         }
-        token = DEMO_JWT;
+        return;
       }
 
       const res = await fetch("/api/user/dashboard", {
@@ -137,9 +134,18 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
 
       if (res.status === 401) {
         if (typeof window !== "undefined") {
-          localStorage.setItem("auth_token", DEMO_JWT);
+          localStorage.removeItem("auth_token");
+          localStorage.removeItem("user");
+          window.location.href = "/auth/patient/login";
         }
-        return fetchDashboardData();
+        return;
+      }
+
+      if (res.status === 403) {
+        if (typeof window !== "undefined") {
+          window.location.href = "/doctor/dashboard";
+        }
+        return;
       }
 
       const data = await res.json();
@@ -166,7 +172,11 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
     if (!newTimeline.title.trim()) return;
     try {
       setSubmittingTimeline(true);
-      const token = (typeof window !== "undefined" && localStorage.getItem("auth_token")) || DEMO_JWT;
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      if (!token) {
+        window.location.href = "/auth/patient/login";
+        return;
+      }
       const res = await fetch("/api/patient/timeline", {
         method: "POST",
         headers: {
@@ -209,7 +219,11 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
     if (!newMedicine.name.trim()) return;
     try {
       setSubmittingMedicine(true);
-      const token = (typeof window !== "undefined" && localStorage.getItem("auth_token")) || DEMO_JWT;
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      if (!token) {
+        window.location.href = "/auth/patient/login";
+        return;
+      }
       const res = await fetch("/api/patient/medicines", {
         method: "POST",
         headers: {

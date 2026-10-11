@@ -1,28 +1,14 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
 import { query } from '@/lib/db';
+import { requirePatientSession } from '@/lib/serverAuth';
 
 export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies();
-    let token = cookieStore.get('auth_token')?.value;
-
-    if (!token) {
-      const authHeader = request.headers.get('authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7);
-      }
+    const authResult = await requirePatientSession(request);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const { payload } = authResult;
 
     const { filename, ocrResults } = await request.json();
 

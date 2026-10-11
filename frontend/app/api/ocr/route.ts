@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pythonBackendFetch } from "@/lib/api";
+import { requirePatientSession } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 360; // 6 minutes for CPU vision transformer + LLM structuring
@@ -18,6 +19,12 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
+    }
+    const { user, payload } = authResult;
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const clientPatientId = formData.get("patient_id") as string | null;
@@ -30,35 +37,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Authenticate patient session on the server - never trust client spoofing
-    let userId = 1;
-    let verifiedPatientId = "483027156";
-    let verifiedPatientName = patientName || "Rahul Sharma";
-
-    try {
-      const { cookies } = await import("next/headers");
-      const { verifyToken } = await import("@/lib/auth");
-      const cookieStore = await cookies();
-      let token = cookieStore.get("auth_token")?.value;
-      if (!token) {
-        const authHeader = req.headers.get("authorization");
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-          token = authHeader.substring(7);
-        }
-      }
-      if (token) {
-        const payload = verifyToken(token);
-        if (payload?.userId) {
-          userId = payload.userId;
-          if (payload.patientId) verifiedPatientId = payload.patientId;
-          if (payload.name) verifiedPatientName = payload.name;
-        }
-      }
-    } catch (authErr) {
-      console.warn("Auth token extraction warning:", authErr);
-    }
-
-    const effectivePatientId = verifiedPatientId || (clientPatientId?.trim() || "483027156");
+    const userId = user.id;
+    const verifiedPatientId = user.patientId || payload.patientId || "P-000000000";
+    const verifiedPatientName = user.name || patientName || "Patient";
+    const effectivePatientId = verifiedPatientId || (clientPatientId?.trim() || "P-000000000");
 
     if (!ALLOWED_MIME_TYPES.has(file.type)) {
       return NextResponse.json(

@@ -8,6 +8,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-11 — Doctor Dashboard (`/doctor/dashboard`) & Patient Directory Lookup:
+  - Built comprehensive Doctor Dashboard UI matching the project's design system with authenticated doctor profile, persistent database-backed `D-...` ID, verification advisory, and clipboard copying.
+  - Implemented server-side patient directory lookup endpoint (`POST /api/doctor/lookup-patient`) guarded by `requireDoctorSession`.
+  - Added strict server-side validation of patient ID format (`P-...` format enforcement).
+  - Executed queries against real database `"User"` table (zero mock patients, zero fake records, zero placeholder statistics).
+  - Implemented privacy-compliant patient record confirmation: displays verified patient identity while keeping full clinical records, prescriptions, and health trends locked pending clinical authorization.
+  - Implemented interactive UI states: idle, loading, invalid ID format, patient not found, unauthorized session, and success with clinical locks.
+  - Zero modifications to `model/` directory.
+- 2026-10-11 — Full Role-Based Access Control (RBAC) & Route Protection:
+  - Implemented Next.js Server-Side Edge Middleware (`frontend/middleware.ts`) enforcing strict role checks and redirecting unauthenticated or unauthorized users before page rendering.
+  - Built pure Web Crypto JWT validator (`frontend/lib/authEdge.ts`) compatible with Edge runtime without Node.js crypto/buffer dependencies.
+  - Built database-backed API authorization layer (`frontend/lib/serverAuth.ts`) with `requirePatientSession` and `requireDoctorSession` verifying active database records and roles.
+  - Protected patient pages (`/patient/:path*`, `/upload`, `/onboarding`): unauthenticated users redirect to `/auth/patient/login`, doctors redirect to `/doctor/dashboard`.
+  - Protected doctor pages (`/doctor/:path*`): unauthenticated users redirect to `/auth/doctor/login`, patients redirect to `/patient/overview`.
+  - Protected patient APIs (`/api/user/dashboard`, `/api/patient/medicines`, `/api/patient/timeline`, `/api/patient/trends`, `/api/user/save-ocr`, `/api/user/onboarding`, `/api/ocr`): doctors calling as patients receive HTTP 403 Forbidden.
+  - Removed insecure hardcoded `DEMO_JWT` fallback from `frontend/app/patient/context.tsx`, properly redirecting unauthenticated or expired sessions to `/auth/patient/login`.
+  - Removed silent `userId = 1` fallback on `/api/ocr` and `/api/confirm/[id]`, requiring genuine patient authentication.
+  - Zero modifications to `model/` directory.
+- 2026-10-11 — Dual-Role Authentication Backend Flow & UI Routes (Patient & Doctor):
+  - Implemented dedicated backend endpoints: `POST /api/auth/doctor/register` and `POST /api/auth/doctor/login`.
+  - Enforced zero client trust on roles: doctor endpoint strictly sets `role: 'DOCTOR'`, while patient endpoint strictly sets `role: 'PATIENT'`.
+  - Server-side generation and collision-checking for persistent doctor IDs starting with `D-` (e.g., `D-XXXXXXXXX`) and patient IDs with `P-` (e.g., `P-XXXXXXXXX`), preserving all existing patient IDs.
+  - Doctor registration initializes verification status strictly to `PENDING` (no auto-verification upon supplying medical registration number).
+  - Secure bcrypt password hashing, HTTP-only secure cookie issuance, and JWT payload extension (`role`, `doctorId`, `doctorVerificationStatus`).
+  - Cross-role route protection: attempts to log in with a doctor account on patient login, or a patient account on doctor login, are rejected with HTTP 403.
+  - Duplicate account prevention with HTTP 409 and safe error handling.
+  - Created portal landing page (`/auth`) and sub-routes (`/auth/patient/login`, `/auth/patient/signup`, `/auth/doctor/login`, `/auth/doctor/signup`).
+  - Built unified `AuthForm` component (`frontend/components/auth/AuthForm.tsx`) connected to real endpoints, redirecting doctors to `/doctor/dashboard` and patients to `/patient/overview` or `/onboarding`.
+  - Created minimal doctor dashboard landing page (`frontend/app/doctor/dashboard/page.tsx`) displaying doctor ID, pending verification status banner, and credential summary.
+  - Zero modification to `model/` folder.
+- 2026-10-11 — Database Schema & Authentication Extension for Doctors and Patients:
+  - Extended `"User"` table with `role` (`PATIENT` | `DOCTOR`), `doctorId` (`D-` prefix), and `doctorVerificationStatus` (`NOT_REQUIRED` | `PENDING` | `APPROVED` | `REJECTED`).
+  - Added doctor clinical credential columns: `medicalLicenseNumber`, `specialization`, `hospitalAffiliation`, `doctorVerificationNote`, `doctorVerifiedAt`, and `doctorVerifiedBy`.
+  - Added strict database constraints (`user_role_allowed`, `user_doctor_verification_status_allowed`, `user_doctor_id_format`, `user_patient_id_format`, `user_doctor_identity_consistent`).
+  - Implemented server-side cryptographically secure ID generation helpers in `frontend/lib/auth.ts`: `generatePatientId()` (`P-` prefix) and `generateDoctorId()` (`D-` prefix).
+  - Preserved all existing patient accounts, 9-digit patient IDs, legacy IDs, documents, and observation associations without disruption.
+  - Created idempotent SQL migration (`scratch/migrations/001_support_doctors_and_patients.sql`) and verified against Supabase PostgreSQL.
+  - Updated `scratch/supabase_schema.sql` and `docs/api-data/04_DATA_MODEL.md`.
+
+
 ### Fixed
 - 2026-10-10 — Supabase Storage Cloud Bucket Upload & Patient Overview Image Display Fix:
   - Resolved issue where prescription image uploads failed and defaulted to `/sample_prescription.png` placeholder on the Patient Overview dashboard (`/patient/overview`).

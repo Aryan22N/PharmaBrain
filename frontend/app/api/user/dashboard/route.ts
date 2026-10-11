@@ -1,43 +1,16 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken, generate9DigitPatientId } from '@/lib/auth';
+import { generate9DigitPatientId } from '@/lib/auth';
 import { query } from '@/lib/db';
+import { requirePatientSession } from '@/lib/serverAuth';
 
 export async function GET(request: Request) {
   try {
-    const cookieStore = await cookies();
-    let token = cookieStore.get('auth_token')?.value;
-
-    if (!token) {
-      const authHeader = request.headers.get('authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7);
-      }
+    const authResult = await requirePatientSession(request);
+    if (!authResult.ok) {
+      return authResult.response;
     }
 
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token.' }, { status: 401 });
-    }
-
-    // 1. Fetch Verified Patient from Supabase PostgreSQL (never trust client-supplied ID)
-    const users = await query(
-      `SELECT id, name, email, "patientId", "legacyPatientId", "createdAt" 
-       FROM "User" 
-       WHERE id = $1 
-       LIMIT 1;`,
-      [payload.userId]
-    );
-
-    if (users.length === 0) {
-      return NextResponse.json({ error: 'User profile not found.' }, { status: 404 });
-    }
-
-    const user = users[0];
+    const { user } = authResult;
 
     // Ensure 9-digit patientId is always populated
     let patientCode = user.patientId;

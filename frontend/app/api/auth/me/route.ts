@@ -25,7 +25,9 @@ export async function GET(request: Request) {
     }
 
     const users = await query(
-      `SELECT id, name, email, "patientId", "legacyPatientId", "createdAt" 
+      `SELECT id, name, email, "patientId", "legacyPatientId", role, 
+              "doctorId", "doctorVerificationStatus", "medicalLicenseNumber", 
+              "specialization", "hospitalAffiliation", "createdAt" 
        FROM "User" 
        WHERE id = $1 
        LIMIT 1;`,
@@ -44,12 +46,18 @@ export async function GET(request: Request) {
         id: user.id,
         name: user.name,
         email: user.email,
-        patientId: user.patientId,
+        role: user.role || 'PATIENT',
+        patientId: user.patientId || null,
         legacyPatientId: user.legacyPatientId || null,
+        doctorId: user.doctorId || null,
+        doctorVerificationStatus: user.doctorVerificationStatus || null,
+        medicalLicenseNumber: user.medicalLicenseNumber || null,
+        specialization: user.specialization || null,
+        hospitalAffiliation: user.hospitalAffiliation || null,
         createdAt: user.createdAt,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Auth check error:', error);
     return NextResponse.json({ authenticated: false, user: null }, { status: 500 });
   }

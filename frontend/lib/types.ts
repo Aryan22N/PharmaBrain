@@ -180,3 +180,35 @@ export interface HealthResponse {
   medicine_names_indexed: number;
   time: string;
 }
+
+export type UserRole = "PATIENT" | "DOCTOR";
+export type DoctorVerificationStatus = "NOT_REQUIRED" | "PENDING" | "APPROVED" | "REJECTED";
+
+export interface UserAccount {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+  patientId: string | null;
+  legacyPatientId?: string | null;
+  doctorId: string | null;
+  doctorVerificationStatus: DoctorVerificationStatus;
+  medicalLicenseNumber?: string | null;
+  specialization?: string | null;
+  hospitalAffiliation?: string | null;
+  createdAt: string;
+}
+
+export interface DoctorProfile {
+  id: number;
+  doctorId: string;
+  name: string;
+  email: string;
+  verificationStatus: DoctorVerificationStatus;
+  medicalLicenseNumber?: string | null;
+  specialization?: string | null;
+  hospitalAffiliation?: string | null;
+  verifiedAt?: string | null;
+  verifiedBy?: string | null;
+}
+

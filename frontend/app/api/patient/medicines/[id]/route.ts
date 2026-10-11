@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { verifyToken } from "@/lib/auth";
+import { requirePatientSession } from "@/lib/serverAuth";
 import {
   MedicationLifecycleStatus,
   validateStatusTransition,
@@ -23,27 +24,13 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid medication ID" }, { status: 400 });
     }
 
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
+    const { user, payload } = authResult;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const patientId = payload.patientId || "483027156";
+    const patientId = user.patientId || payload.patientId || "483027156";
     const patientIds = Array.from(
       new Set([patientId, "CCM12578", "demo-patient-1", "713590440", "545590541", "443213338", "960183477"].filter(Boolean))
     );
@@ -216,27 +203,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Invalid medication ID" }, { status: 400 });
     }
 
-    let token: string | null = null;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7);
+    const authResult = await requirePatientSession(req);
+    if (!authResult.ok) {
+      return authResult.response;
     }
-    if (!token) {
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get("auth_token")?.value || null;
-    }
+    const { user, payload } = authResult;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyToken(token);
-    if (!payload?.userId) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const patientId = payload.patientId || "483027156";
+    const patientId = user.patientId || payload.patientId || "483027156";
     const patientIds = Array.from(
       new Set([patientId, "CCM12578", "demo-patient-1", "713590440", "545590541", "443213338", "960183477"].filter(Boolean))
     );

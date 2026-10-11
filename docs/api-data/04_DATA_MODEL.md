@@ -82,6 +82,15 @@ erDiagram
         varchar email
         varchar passwordHash
         varchar createdAt
+        varchar role
+        varchar doctorId
+        varchar doctorVerificationStatus
+        varchar medicalLicenseNumber
+        varchar specialization
+        varchar hospitalAffiliation
+        text doctorVerificationNote
+        varchar doctorVerifiedAt
+        varchar doctorVerifiedBy
     }
     Document {
         int id PK
@@ -282,7 +291,7 @@ Managed by `frontend/lib/db.ts` and API endpoints.
 
 | Table | Purpose |
 |---|---|
-| `"User"` | Patient accounts: `id`, `patientId` (9-digit), `legacyPatientId`, `name`, `email`, `passwordHash`, `createdAt` |
+| `"User"` | User accounts (Patients & Doctors): `id`, `patientId` (prefixed `P-` or 9-digit), `legacyPatientId`, `name`, `email`, `passwordHash`, `createdAt`, `role` (`PATIENT` \| `DOCTOR`), `doctorId` (`D-` prefix), `doctorVerificationStatus` (`NOT_REQUIRED` \| `PENDING` \| `APPROVED` \| `REJECTED`), `medicalLicenseNumber`, `specialization`, `hospitalAffiliation`, `doctorVerificationNote`, `doctorVerifiedAt`, `doctorVerifiedBy` |
 | `"Document"` | Uploaded prescription records: `id`, `userId`, `patientId`, `originalName`, `storedFilename` (stores public Supabase Storage CDN URL or local fallback path), `documentType` (`PRESCRIPTION`), `mimeType`, `filePath` (`/extractions/<id>`), `status` (`NOT CONFIRMED` \| `CONFIRMED` \| `DISCARDED`), `uploadedAt` |
 | `"Analysis"` | Structured analysis linked to document: `id`, `documentId`, `summary`, `structuredResult` (JSONB containing full extraction record and `image_url`), `isDemo`, `createdAt` |
 | `patient_onboarding` | Patient baseline health context: `id`, `user_id`, `patient_id`, `basic_info` (JSONB), `conditions` (JSONB), `custom_conditions` (JSONB), `history` (JSONB), `is_completed`, `created_at`, `updated_at` |
