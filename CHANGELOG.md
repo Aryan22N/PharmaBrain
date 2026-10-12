@@ -8,7 +8,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
-- 2026-10-12 — Unconfirmed Prescription Review/Discard Lifecycle, Accurate Provenance Attribution, and UI Refinements:
+- 2026-10-12 — Step 4: Doctor Dashboard Real Backend Integration & Resilient States:
+  - **Real Backend Data Integration**:
+    - Connected `/doctor/dashboard` to authenticated doctor identity (`GET /api/auth/me`), permanent doctor identifier (`D-XXXXXXXXX`), and live consultation access requests (`GET /api/doctor/access-requests`).
+    - Added real-time computed practice KPI metric cards (Active Consultations, Pending Authorizations, Total Directory Queries) dynamically calculated from verified Supabase records without mock or hardcoded statistics.
+  - **Robust State Handling & Resilience**:
+    - Implemented dedicated session error state screen with Retry button on `/doctor/dashboard` to handle temporary network or server failures gracefully.
+    - Implemented `requestsError` state banner with in-place Retry action in the access requests table.
+    - Added in-place Retry action for directory search error states.
+    - Separated `403 Forbidden` (clinical consent locked), `404 Not Found`, and `>= 500` (server/network failure) in `/doctor/patients/[patientId]` with in-page retry without requiring browser reload.
+  - **Security & TLS Verification**:
+    - Enforced full TLS certificate validation (`rejectUnauthorized: true` with official Supabase Root & Intermediate CA bundle) in `frontend/lib/db.ts`.
+    - Verified strict server-side RBAC and IDOR protection across 10 security test scenarios and 12 full regression audit checks (100% pass rate).
   - **Prescription Draft Discard & Review Flow**:
     - Added top alert notification and inline draft callout cards on `/patient/timeline` for unconfirmed OCR prescriptions (`Prescription Scan (Draft)`, `Awaiting Review`, `Unsaved Draft`).
     - Implemented **"Discard Draft"** and **"Review & Submit"** actions allowing patients to discard abandoned drafts or navigate to complete confirmation.
