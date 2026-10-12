@@ -10,9 +10,40 @@ export async function POST(
   try {
     const { id } = await context.params;
     const body = await req.json();
+    const cleanId = String(id).replace(/^doc-/, "").trim();
+    const numId = Number(cleanId);
+    const validNum = !isNaN(numId) && numId > 0 ? numId : -1;
+
+    // Check if a document entry exists for this id (either Document.id or extraction_id in filePath)
+    let matchedDoc: any = null;
+    let realExtractionId = cleanId;
+
+    try {
+      const { query } = await import("@/lib/db");
+      const foundDocs = await query(
+        `SELECT d.id, d."originalName", d."storedFilename", d."filePath", d.status, d."patientId", d."userId",
+                a."structuredResult", a.summary
+         FROM "Document" d
+         LEFT JOIN "Analysis" a ON d.id = a."documentId"
+         WHERE d.id = $1 
+            OR d."filePath" = $2 
+            OR d."filePath" LIKE $3 
+            OR d."filePath" = $4
+         ORDER BY d.id DESC LIMIT 1;`,
+        [validNum, `/extractions/${cleanId}`, `%/extractions/${cleanId}%`, cleanId]
+      );
+      if (foundDocs.length > 0) {
+        matchedDoc = foundDocs[0];
+        if (matchedDoc.filePath && matchedDoc.filePath.startsWith("/extractions/")) {
+          realExtractionId = matchedDoc.filePath.replace("/extractions/", "").trim();
+        }
+      }
+    } catch (e) {
+      console.warn("[API/CONFIRM] Pre-lookup for document error:", e);
+    }
 
     const result = await pythonBackendFetch(
-      `confirm/${encodeURIComponent(id)}`,
+      `confirm/${encodeURIComponent(realExtractionId)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -21,7 +52,7 @@ export async function POST(
     );
 
     if (!result.ok) {
-      if (result.status === 409) {
+      if (result.status === 409 && !result.error?.includes("already confirmed")) {
         return NextResponse.json(
           { error: result.error || "Confirmation failed" },
           { status: 409 }
@@ -56,6 +87,13 @@ export async function POST(
         }
       } catch (authErr) {}
 
+      if (!userId && matchedDoc?.userId) {
+        userId = matchedDoc.userId;
+      }
+      if (!patientId && matchedDoc?.patientId) {
+        patientId = matchedDoc.patientId;
+      }
+
       if (!userId) {
         return NextResponse.json({ error: "Authentication required to confirm prescription" }, { status: 401 });
       }
@@ -73,33 +111,24 @@ export async function POST(
         .map((m: any) => `${m.name || "Medicine"} ${m.strength || ""}`.trim())
         .filter(Boolean)
         .join(", ");
-      const docSummary = `${rec.hospital || "Medical Facility"} (${typeof rec.doctor === "string" ? rec.doctor : rec.doctor?.name || "Dr. Verified"}). Prescribed: ${medSummary || "Verified therapies"}.`;
+      const docSummary = `${rec.hospital || "Medical Facility"} (${typeof rec.doctor === "string" ? rec.doctor : rec.doctor?.name || "Dr. Verified"}). Prescribed: ${medSummary || "Verified therapies"}. Status: CONFIRMED (Verified EHR Record).`;
 
-      // Check if an unconfirmed document entry exists for this extraction
-      const existingDocs = await query(
-        `SELECT d.id, d."storedFilename", a."structuredResult" 
-         FROM "Document" d
-         LEFT JOIN "Analysis" a ON d.id = a."documentId"
-         WHERE d."filePath" = $1 ORDER BY d.id DESC LIMIT 1;`,
-        [`/extractions/${id}`]
-      );
-
-      if (existingDocs.length > 0) {
-        const docId = existingDocs[0].id;
-        let prevResult = existingDocs[0].structuredResult || {};
+      if (matchedDoc) {
+        const docId = matchedDoc.id;
+        let prevResult = matchedDoc.structuredResult || {};
         if (typeof prevResult === "string") {
           try { prevResult = JSON.parse(prevResult); } catch (_) { prevResult = {}; }
         }
         if (!rec.image_url && prevResult.image_url && prevResult.image_url !== "/sample_prescription.png") {
           rec.image_url = prevResult.image_url;
-        } else if (!rec.image_url && existingDocs[0].storedFilename && existingDocs[0].storedFilename !== "/sample_prescription.png" && (existingDocs[0].storedFilename.startsWith("/uploads/") || existingDocs[0].storedFilename.startsWith("http://") || existingDocs[0].storedFilename.startsWith("https://"))) {
-          rec.image_url = existingDocs[0].storedFilename;
+        } else if (!rec.image_url && matchedDoc.storedFilename && matchedDoc.storedFilename !== "/sample_prescription.png" && (matchedDoc.storedFilename.startsWith("/uploads/") || matchedDoc.storedFilename.startsWith("http://") || matchedDoc.storedFilename.startsWith("https://"))) {
+          rec.image_url = matchedDoc.storedFilename;
         }
         await query(
           `UPDATE "Document" 
            SET status = 'CONFIRMED', "originalName" = $1, "storedFilename" = COALESCE($2, "storedFilename")
            WHERE id = $3;`,
-          [docName, rec.image_url || existingDocs[0].storedFilename, docId]
+          [docName, rec.image_url || matchedDoc.storedFilename, docId]
         );
         await query(
           `UPDATE "Analysis" 
@@ -112,17 +141,16 @@ export async function POST(
         await query(
           `UPDATE "Document"
            SET status = 'CONFIRMED'
-           WHERE ("filePath" = $1 OR "filePath" LIKE $2)
-             AND ("userId" = $3 OR "patientId" = $4)
-             AND status != 'CONFIRMED';`,
-          [`/extractions/${id}`, `%/extractions/${id}%`, userId, patientId]
+           WHERE ("filePath" = $1 OR "filePath" LIKE $2 OR id = $3)
+             AND ("userId" = $4 OR "patientId" = $5);`,
+          [`/extractions/${realExtractionId}`, `%/extractions/${realExtractionId}%`, docId, userId, patientId]
         );
       } else {
         const docRows = await query(
           `INSERT INTO "Document" ("userId", "patientId", "originalName", "storedFilename", "documentType", "mimeType", "filePath", status, "uploadedAt")
            VALUES ($1, $2, $3, $4, 'PRESCRIPTION', 'image/jpeg', $5, 'CONFIRMED', $6)
            RETURNING id;`,
-          [userId, patientId, docName, rec.image_url || `/extractions/${id}`, `/extractions/${id}`, new Date().toISOString()]
+          [userId, patientId, docName, rec.image_url || `/extractions/${realExtractionId}`, `/extractions/${realExtractionId}`, new Date().toISOString()]
         );
 
         if (docRows.length > 0) {
@@ -134,30 +162,52 @@ export async function POST(
         }
       }
 
-      // Automatically track to Medical Timeline
+      // Sync extractions table if present in DB
+      try {
+        const extNum = Number(realExtractionId);
+        if (!isNaN(extNum) && extNum > 0) {
+          await query(`UPDATE extractions SET status = 'CONFIRMED' WHERE id = $1;`, [extNum]);
+        }
+      } catch (_) {}
+
+      // Automatically track or update Medical Timeline
       const eventDate = rec.date_iso || new Date().toISOString().slice(0, 10);
       const docNameStr = typeof rec.doctor === "string" ? rec.doctor : rec.doctor?.name || "Attending Physician";
       const hospNameStr = rec.hospital || "Medical Centre";
-      const refId = `HMS-RX-${id}`;
+      const refId = `HMS-RX-${realExtractionId}`;
 
       try {
-        await query(
-          `INSERT INTO patient_timeline_events (
-            patient_id, user_id, event_date, category, title, description,
-            source, reliability, verification_status, facility, doctor, reference_id,
-            is_conflicting, conflict_details
-          ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Prescription Scan', 'High', 'Prescription Verified', $6, $7, $8, false, null);`,
-          [
-            patientId,
-            userId,
-            eventDate,
-            `Prescription: ${medSummary || "Clinical Rx"}`,
-            docSummary,
-            hospNameStr,
-            docNameStr,
-            refId,
-          ]
+        const existingTl = await query(
+          `SELECT id FROM patient_timeline_events WHERE reference_id = $1 OR reference_id = $2 LIMIT 1;`,
+          [refId, matchedDoc ? `HMS-DOC-${matchedDoc.id}` : refId]
         );
+        if (existingTl.length > 0) {
+          await query(
+            `UPDATE patient_timeline_events
+             SET verification_status = 'Prescription Verified', reliability = 'High', source = 'Prescription Scan',
+                 title = $1, description = $2, facility = $3, doctor = $4, event_date = $5
+             WHERE id = $6;`,
+            [`Prescription: ${medSummary || "Clinical Rx"}`, docSummary, hospNameStr, docNameStr, eventDate, existingTl[0].id]
+          );
+        } else {
+          await query(
+            `INSERT INTO patient_timeline_events (
+              patient_id, user_id, event_date, category, title, description,
+              source, reliability, verification_status, facility, doctor, reference_id,
+              is_conflicting, conflict_details
+            ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Prescription Scan', 'High', 'Prescription Verified', $6, $7, $8, false, null);`,
+            [
+              patientId,
+              userId,
+              eventDate,
+              `Prescription: ${medSummary || "Clinical Rx"}`,
+              docSummary,
+              hospNameStr,
+              docNameStr,
+              refId,
+            ]
+          );
+        }
       } catch (tlErr) {
         console.warn("Could not auto-add to timeline_events:", tlErr);
       }

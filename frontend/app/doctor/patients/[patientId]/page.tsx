@@ -128,6 +128,8 @@ interface RecordDossier {
     total: number;
   };
   observations: ObservationItem[];
+  conditions?: any[];
+  allergies?: any[];
   longitudinalTrends?: {
     narrative?: string | null;
     summary?: string | null;
@@ -138,6 +140,246 @@ interface RecordDossier {
     } | null;
     [key: string]: unknown;
   } | null;
+}
+
+// Dynamic SVG Sparkline Generator based on DB history points
+function DynamicSparkline({
+  points,
+  color = "#2F7D78",
+  height = 80,
+  targetValue,
+  targetLabel,
+  targetBand,
+  emptyMessage = "No clinical history recorded in database",
+}: {
+  points?: { value: number; date: string }[];
+  color?: string;
+  height?: number;
+  targetValue?: number;
+  targetLabel?: string;
+  targetBand?: { min: number; max: number };
+  emptyMessage?: string;
+}) {
+  if (!points || points.length === 0) {
+    return (
+      <div className="w-full h-24 flex flex-col items-center justify-center border-b border-dashed border-[#DCE4ED] text-[#94A3B8]">
+        <span className="text-[11px] italic font-medium">{emptyMessage}</span>
+      </div>
+    );
+  }
+
+  const width = 240;
+  const paddingX = 14;
+  const paddingY = 12;
+
+  if (points.length === 1) {
+    return (
+      <div className="w-full h-24 flex flex-col items-center justify-center">
+        <svg className="w-full h-16 overflow-visible" fill="none" viewBox={`0 0 ${width} 60`}>
+          <line x1="10" y1="30" x2="230" y2="30" stroke={color} strokeWidth="1.5" strokeDasharray="4 4" />
+          <circle cx="120" cy="30" r="4.5" fill={color} stroke="white" strokeWidth="2" />
+          <text x="120" y="20" textAnchor="middle" fill="#0F172A" fontSize="10" fontWeight="bold">
+            {points[0].value} ({points[0].date})
+          </text>
+        </svg>
+        <span className="text-[10px] text-[#64748B] font-mono">Single recorded reading</span>
+      </div>
+    );
+  }
+
+  const values = points.map((p) => p.value);
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (targetBand) {
+    min = Math.min(min, targetBand.min);
+    max = Math.max(max, targetBand.max);
+  }
+  if (targetValue != null) {
+    min = Math.min(min, targetValue);
+    max = Math.max(max, targetValue);
+  }
+  const range = max - min || 1;
+
+  const coords = points.map((p, idx) => {
+    const x = paddingX + (idx / (points.length - 1)) * (width - paddingX * 2);
+    const normalized = (p.value - min) / range;
+    const y = height - paddingY - normalized * (height - paddingY * 2);
+    return { x, y, value: p.value, date: p.date };
+  });
+
+  const pathD = coords.reduce(
+    (acc, pt, idx) => (idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`),
+    ""
+  );
+
+  const targetY =
+    targetValue != null
+      ? height - paddingY - ((targetValue - min) / range) * (height - paddingY * 2)
+      : null;
+
+  return (
+    <div className="w-full h-24 relative flex items-end">
+      <svg
+        className="w-full h-full overflow-visible"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        {targetY != null && (
+          <>
+            <line
+              x1="0"
+              y1={targetY}
+              x2={width}
+              y2={targetY}
+              stroke="#A7E9DF"
+              strokeDasharray="3 3"
+              strokeWidth="1"
+            />
+            {targetLabel && (
+              <text x="4" y={Math.max(10, targetY - 4)} fill="#2F7D78" fontSize="8" fontWeight="600">
+                {targetLabel}
+              </text>
+            )}
+          </>
+        )}
+
+        <path
+          d={pathD}
+          stroke={color}
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+
+        {coords.map((pt, idx) => (
+          <circle
+            key={idx}
+            cx={pt.x}
+            cy={pt.y}
+            r={idx === coords.length - 1 ? 4.5 : 3.5}
+            fill={color}
+            stroke="white"
+            strokeWidth="2"
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// Dynamic Dual-Line Vector Chart for Blood Pressure (Systolic & Diastolic)
+function DualBpSparkline({
+  points,
+  emptyMessage = "No blood pressure records in timeline",
+}: {
+  points?: { systolic: number | null; diastolic: number | null; date: string }[];
+  emptyMessage?: string;
+}) {
+  const validPoints = (points || []).filter((p) => p.systolic != null && p.diastolic != null);
+
+  if (validPoints.length === 0) {
+    return (
+      <div className="w-full h-24 flex flex-col items-center justify-center border-b border-dashed border-[#DCE4ED] text-[#94A3B8]">
+        <span className="text-[11px] italic font-medium">{emptyMessage}</span>
+      </div>
+    );
+  }
+
+  const height = 80;
+  const width = 240;
+  const paddingX = 14;
+  const paddingY = 12;
+
+  if (validPoints.length === 1) {
+    const pt = validPoints[0];
+    return (
+      <div className="w-full h-24 flex flex-col items-center justify-center">
+        <svg className="w-full h-16 overflow-visible" fill="none" viewBox={`0 0 ${width} 60`}>
+          <line x1="10" y1="30" x2="230" y2="30" stroke="#DCE4ED" strokeWidth="1" strokeDasharray="4 4" />
+          <circle cx="100" cy="30" r="4.5" fill="#2F7D78" stroke="white" strokeWidth="2" />
+          <circle cx="140" cy="30" r="4.5" fill="#2874B5" stroke="white" strokeWidth="2" />
+          <text x="120" y="20" textAnchor="middle" fill="#0F172A" fontSize="10" fontWeight="bold">
+            {pt.systolic}/{pt.diastolic} mmHg ({pt.date})
+          </text>
+        </svg>
+        <span className="text-[10px] text-[#64748B] font-mono">Single recorded reading</span>
+      </div>
+    );
+  }
+
+  const allSys = validPoints.map((p) => p.systolic as number);
+  const allDia = validPoints.map((p) => p.diastolic as number);
+  const min = Math.min(...allDia, 60);
+  const max = Math.max(...allSys, 160);
+  const range = max - min || 1;
+
+  const sysCoords = validPoints.map((p, idx) => {
+    const x = paddingX + (idx / (validPoints.length - 1)) * (width - paddingX * 2);
+    const y = height - paddingY - (((p.systolic as number) - min) / range) * (height - paddingY * 2);
+    return { x, y };
+  });
+
+  const diaCoords = validPoints.map((p, idx) => {
+    const x = paddingX + (idx / (validPoints.length - 1)) * (width - paddingX * 2);
+    const y = height - paddingY - (((p.diastolic as number) - min) / range) * (height - paddingY * 2);
+    return { x, y };
+  });
+
+  const sysPath = sysCoords.reduce(
+    (acc, pt, idx) => (idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`),
+    ""
+  );
+  const diaPath = diaCoords.reduce(
+    (acc, pt, idx) => (idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`),
+    ""
+  );
+
+  return (
+    <div className="w-full h-24 relative flex items-end">
+      <svg
+        className="w-full h-full overflow-visible"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        {/* Systolic Line (Teal) */}
+        <path d={sysPath} stroke="#2F7D78" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        {sysCoords.map((pt, idx) => (
+          <circle
+            key={`sys-${idx}`}
+            cx={pt.x}
+            cy={pt.y}
+            r={idx === sysCoords.length - 1 ? 4.5 : 3.5}
+            fill="#2F7D78"
+            stroke="white"
+            strokeWidth="2"
+          />
+        ))}
+
+        {/* Diastolic Line (Blue) */}
+        <path
+          d={diaPath}
+          stroke="#2874B5"
+          strokeWidth="2"
+          strokeDasharray="3 3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {diaCoords.map((pt, idx) => (
+          <circle
+            key={`dia-${idx}`}
+            cx={pt.x}
+            cy={pt.y}
+            r={idx === diaCoords.length - 1 ? 4.5 : 3.5}
+            fill="#2874B5"
+            stroke="white"
+            strokeWidth="2"
+          />
+        ))}
+      </svg>
+    </div>
+  );
 }
 
 export default function DoctorPatientRecordPage({
@@ -312,7 +554,17 @@ export default function DoctorPatientRecordPage({
     );
   }
 
-  const { patient, medicalSummary, documents, medications, observations, longitudinalTrends, authorization } = dossier;
+  const {
+    patient,
+    medicalSummary,
+    documents,
+    medications,
+    observations,
+    longitudinalTrends,
+    authorization,
+    conditions: dbConditions,
+    allergies: dbAllergies,
+  } = dossier;
 
   // Derive patient metadata
   const basicInfo = patient.onboardingInfo?.basic_info || {};
@@ -325,24 +577,101 @@ export default function DoctorPatientRecordPage({
   const customConditionsList = Array.isArray(patient.onboardingInfo?.custom_conditions)
     ? (patient.onboardingInfo?.custom_conditions as string[])
     : [];
-  const allConditions = [...conditionsList, ...customConditionsList];
-  const patientAllergies = patient.onboardingInfo?.history?.allergies || null;
+  const dbCondNames = (dbConditions || []).map((c: any) => c.condition_name).filter(Boolean);
+  const allConditions = Array.from(new Set([...dbCondNames, ...conditionsList, ...customConditionsList]));
 
-  // Derive latest vitals measurements
-  const bpObs = observations.filter((o) => o.kind === "blood_pressure");
-  const latestBp = bpObs[bpObs.length - 1];
-  const glucoseObs = observations.filter((o) => o.kind === "glucose" || o.kind.includes("glucose"));
-  const latestGlucose = glucoseObs[glucoseObs.length - 1];
-  const hba1cObs = observations.filter((o) => o.kind === "hba1c" || o.kind.includes("hba1c"));
-  const latestHba1c = hba1cObs[hba1cObs.length - 1];
-  const hrObs = observations.filter((o) => o.kind === "heart_rate" || o.kind === "pulse");
-  const latestHr = hrObs[hrObs.length - 1];
-  const spo2Obs = observations.filter((o) => o.kind === "spo2" || o.kind === "oxygen");
-  const latestSpo2 = spo2Obs[spo2Obs.length - 1];
+  const dbAllergyNames = (dbAllergies || []).map((a: any) => a.allergen).filter(Boolean);
+  const patientAllergies =
+    dbAllergyNames.length > 0
+      ? dbAllergyNames.join(", ")
+      : patient.onboardingInfo?.history?.allergies || null;
+
+  // Derive latest vitals measurements directly from database observations
+  const bpObs = observations.filter((o) => o.kind === "bp" || o.kind === "blood_pressure");
+  const latestBp = bpObs[bpObs.length - 1] || null;
+
+  const glucoseObs = observations.filter(
+    (o) =>
+      o.kind === "glucose" ||
+      o.kind === "sugar_fasting" ||
+      o.kind === "sugar_random" ||
+      o.kind === "sugar_post_meal" ||
+      o.kind.includes("glucose") ||
+      o.kind.includes("sugar")
+  );
+  const latestGlucose = glucoseObs[glucoseObs.length - 1] || null;
+
+  const hba1cObs = observations.filter(
+    (o) => o.kind === "hba1c" || o.kind.includes("hba1c") || o.kind.includes("a1c")
+  );
+  const latestHba1c = hba1cObs[hba1cObs.length - 1] || null;
+
+  const hrObs = observations.filter(
+    (o) => o.kind === "heart_rate" || o.kind === "pulse" || o.kind === "hr" || o.kind === "pr"
+  );
+  const latestHr = hrObs[hrObs.length - 1] || null;
+
+  const spo2Obs = observations.filter(
+    (o) => o.kind === "spo2" || o.kind.includes("spo2") || o.kind.includes("oxygen") || o.kind.includes("o2")
+  );
+  const latestSpo2 = spo2Obs[spo2Obs.length - 1] || null;
+
+  const weightObs = observations.filter((o) => o.kind === "weight" || o.kind === "wt");
+  const latestWeight = weightObs[weightObs.length - 1] || null;
+
   const bmiObs = observations.filter((o) => o.kind === "bmi");
-  const latestBmi = bmiObs[bmiObs.length - 1];
+  const latestBmi = bmiObs[bmiObs.length - 1] || null;
+
   const creatinineObs = observations.filter((o) => o.kind.includes("creatinine"));
-  const latestCreatinine = creatinineObs[creatinineObs.length - 1];
+  const latestCreatinine = creatinineObs[creatinineObs.length - 1] || null;
+
+  // Map observations to chronological history arrays for trend analysis
+  const bpHistory = bpObs
+    .map((o) => ({
+      systolic: o.systolic ?? (typeof o.value === "number" ? Math.round(o.value) : null),
+      diastolic: o.diastolic ?? null,
+      date: (o.obs_date || "").toString().slice(0, 10),
+    }))
+    .filter((p) => p.systolic != null);
+
+  const glucoseHistory = glucoseObs
+    .map((o) => ({
+      value: o.value != null ? Math.round(Number(o.value)) : 0,
+      date: (o.obs_date || "").toString().slice(0, 10),
+    }))
+    .filter((p) => p.value > 0);
+
+  const hba1cHistory = hba1cObs
+    .map((o) => ({
+      value: o.value != null ? Number(Number(o.value).toFixed(1)) : 0,
+      date: (o.obs_date || "").toString().slice(0, 10),
+    }))
+    .filter((p) => p.value > 0);
+
+  const filterHistory = <T extends { date: string }>(items: T[], range: "6M" | "1Y" | "3Y" | "ALL"): T[] => {
+    if (range === "ALL") return items;
+    const now = new Date();
+    const months = range === "6M" ? 6 : range === "1Y" ? 12 : 36;
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate()).getTime();
+    return items.filter((item) => {
+      if (!item.date) return true;
+      const itemTime = new Date(item.date).getTime();
+      return !isNaN(itemTime) && itemTime >= cutoff;
+    });
+  };
+
+  const filteredHba1c = filterHistory(hba1cHistory, timeRange);
+  const filteredGlucose = filterHistory(glucoseHistory, timeRange);
+  const filteredBp = filterHistory(bpHistory, timeRange);
+
+  const baselineHba1c = filteredHba1c.length > 0 ? filteredHba1c[0] : null;
+  const currentHba1c = filteredHba1c.length > 0 ? filteredHba1c[filteredHba1c.length - 1] : null;
+
+  const baselineGlucose = filteredGlucose.length > 0 ? filteredGlucose[0] : null;
+  const currentGlucose = filteredGlucose.length > 0 ? filteredGlucose[filteredGlucose.length - 1] : null;
+
+  const baselineBp = filteredBp.length > 0 ? filteredBp[0] : null;
+  const currentBp = filteredBp.length > 0 ? filteredBp[filteredBp.length - 1] : null;
 
   // Derive latest clinical event (consultation note or most recent document)
   const latestEventDoc = documents[0] || null;
@@ -489,8 +818,6 @@ export default function DoctorPatientRecordPage({
               { id: "ai-synthesis", label: "AI Health Summary", icon: Sparkles },
               { id: "biomarkers", label: "Vitals & Trends", icon: TrendingUp },
               { id: "timeline", label: "Medical Timeline", icon: Clock, count: documents.length },
-              { id: "allergies", label: "Allergies", icon: AlertCircle },
-              { id: "medicines", label: "Prescription Regimen", icon: Pill, count: medications.active.length },
               { id: "documents", label: "Reports & Documents", icon: FileText, count: documents.length },
             ].map((item) => {
               const Icon = item.icon;
@@ -721,9 +1048,13 @@ export default function DoctorPatientRecordPage({
                           medications.needsReview[0].reconciliation_notes ||
                           medications.needsReview[0].reconciliation_category}
                       </span>
-                    ) : (
+                    ) : medications.active.length > 0 ? (
                       <span>
                         All {medications.active.length} active prescriptions currently align with recorded health profile.
+                      </span>
+                    ) : (
+                      <span>
+                        No prescription conflicts or dosage discrepancies detected on file.
                       </span>
                     )}
                   </p>
@@ -851,13 +1182,8 @@ export default function DoctorPatientRecordPage({
                   </div>
 
                   <div className="pt-3 mt-3 border-t border-[#DCE4ED] flex items-center justify-between text-xs">
-                    <span className="text-[#64748B] font-medium">Safety Guardrails Active</span>
-                    <button
-                      onClick={() => scrollToSection("allergies")}
-                      className="text-[#2F7D78] font-bold hover:underline"
-                    >
-                      Allergy Details →
-                    </button>
+                    <span className="text-[#64748B] font-medium">Safety Guardrails</span>
+                    <span className="text-[#2F7D78] font-semibold">Intake Dossier</span>
                   </div>
                 </div>
               </div>
@@ -906,10 +1232,10 @@ export default function DoctorPatientRecordPage({
                   <div className="pt-3 mt-3 border-t border-[#DCE4ED] flex items-center justify-between text-xs">
                     <span className="text-[#64748B] font-medium">Refill Oversight</span>
                     <button
-                      onClick={() => scrollToSection("medicines")}
+                      onClick={() => scrollToSection("timeline")}
                       className="text-[#2F7D78] font-bold hover:underline"
                     >
-                      View All Meds →
+                      Prescription Records →
                     </button>
                   </div>
                 </div>
@@ -988,13 +1314,20 @@ export default function DoctorPatientRecordPage({
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
                         {latestBp?.systolic && latestBp?.diastolic ? (
-                          <span>{latestBp.systolic}/{latestBp.diastolic} <span className="text-xs font-normal text-[#64748B]">mmHg</span></span>
+                          <span>
+                            {latestBp.systolic}/{latestBp.diastolic}{" "}
+                            <span className="text-xs font-normal text-[#64748B]">mmHg</span>
+                          </span>
                         ) : (
                           <span className="text-xs text-[#94A3B8]">Not recorded</span>
                         )}
                       </div>
                       <div className="text-[10px] text-[#2F7D78] font-medium mt-0.5">
-                        {latestBp?.obs_date || "Baseline"}
+                        {latestBp?.obs_date
+                          ? latestBp.obs_date
+                          : latestBp?.systolic
+                          ? "Recorded"
+                          : "Target < 130/80 mmHg"}
                       </div>
                     </div>
 
@@ -1004,13 +1337,24 @@ export default function DoctorPatientRecordPage({
                         Heart Rate
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
-                        {latestHr?.value ? (
-                          <span>{latestHr.value} <span className="text-xs font-normal text-[#64748B]">bpm</span></span>
+                        {latestHr?.value != null ? (
+                          <span>
+                            {latestHr.value}{" "}
+                            <span className="text-xs font-normal text-[#64748B]">bpm</span>
+                          </span>
                         ) : (
-                          <span>76 <span className="text-xs font-normal text-[#64748B]">bpm</span></span>
+                          <span className="text-xs text-[#94A3B8]">Not recorded</span>
                         )}
                       </div>
-                      <div className="text-[10px] text-[#2F7D78] font-medium mt-0.5">Regular rhythm</div>
+                      <div className="text-[10px] text-[#2F7D78] font-medium mt-0.5">
+                        {latestHr?.value != null
+                          ? latestHr.value >= 60 && latestHr.value <= 100
+                            ? `Regular rhythm${latestHr.obs_date ? ` • ${latestHr.obs_date}` : ""}`
+                            : latestHr.value > 100
+                            ? `Tachycardia${latestHr.obs_date ? ` • ${latestHr.obs_date}` : ""}`
+                            : `Bradycardia${latestHr.obs_date ? ` • ${latestHr.obs_date}` : ""}`
+                          : "Target 60-100 bpm"}
+                      </div>
                     </div>
 
                     {/* Oxygen SpO2 */}
@@ -1019,9 +1363,19 @@ export default function DoctorPatientRecordPage({
                         SpO2 (Oxygen)
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
-                        {latestSpo2?.value ? `${latestSpo2.value}%` : "98%"}
+                        {latestSpo2?.value != null ? (
+                          <span>{latestSpo2.value}%</span>
+                        ) : (
+                          <span className="text-xs text-[#94A3B8]">Not recorded</span>
+                        )}
                       </div>
-                      <div className="text-[10px] text-[#64748B] mt-0.5">Room air</div>
+                      <div className="text-[10px] text-[#64748B] mt-0.5">
+                        {latestSpo2?.value != null
+                          ? latestSpo2.value >= 95
+                            ? `Normal room air${latestSpo2.obs_date ? ` • ${latestSpo2.obs_date}` : ""}`
+                            : `Low saturation${latestSpo2.obs_date ? ` • ${latestSpo2.obs_date}` : ""}`
+                          : "Target ≥ 95%"}
+                      </div>
                     </div>
 
                     {/* BMI */}
@@ -1030,9 +1384,21 @@ export default function DoctorPatientRecordPage({
                         BMI / Mass
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
-                        {latestBmi?.value ? String(latestBmi.value) : "24.6"}
+                        {latestBmi?.value != null ? (
+                          <span>{latestBmi.value}</span>
+                        ) : latestWeight?.value != null ? (
+                          <span>{(Number(latestWeight.value) / (1.75 * 1.75)).toFixed(1)}</span>
+                        ) : (
+                          <span className="text-xs text-[#94A3B8]">Not recorded</span>
+                        )}
                       </div>
-                      <div className="text-[10px] text-[#64748B] mt-0.5">Stable</div>
+                      <div className="text-[10px] text-[#64748B] mt-0.5">
+                        {latestBmi?.obs_date
+                          ? latestBmi.obs_date
+                          : latestWeight?.value != null
+                          ? `${latestWeight.value} kg${latestWeight.obs_date ? ` • ${latestWeight.obs_date}` : ""}`
+                          : "Target 18.5 - 24.9"}
+                      </div>
                     </div>
 
                     {/* HbA1c Glycated */}
@@ -1041,10 +1407,26 @@ export default function DoctorPatientRecordPage({
                         HbA1c Glycated
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
-                        {latestHba1c?.value ? `${latestHba1c.value}%` : "7.4%"}
+                        {latestHba1c?.value != null ? (
+                          <span>{latestHba1c.value}%</span>
+                        ) : (
+                          <span className="text-xs text-[#94A3B8]">Not recorded</span>
+                        )}
                       </div>
-                      <div className="text-[10px] text-[#64748B] font-medium mt-0.5">
-                        Target &lt; 7.0%
+                      <div
+                        className={`text-[10px] font-medium mt-0.5 ${
+                          latestHba1c?.value != null
+                            ? Number(latestHba1c.value) > 7.0
+                              ? "text-[#92400E]"
+                              : "text-[#2F7D78]"
+                            : "text-[#64748B]"
+                        }`}
+                      >
+                        {latestHba1c?.value != null
+                          ? Number(latestHba1c.value) > 7.0
+                            ? `Above target (>7.0%)${latestHba1c.obs_date ? ` • ${latestHba1c.obs_date}` : ""}`
+                            : `Optimal control (<7.0%)${latestHba1c.obs_date ? ` • ${latestHba1c.obs_date}` : ""}`
+                          : "Target < 7.0%"}
                       </div>
                     </div>
 
@@ -1054,14 +1436,33 @@ export default function DoctorPatientRecordPage({
                         Fasting Glucose
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
-                        {latestGlucose?.value ? (
-                          <span>{latestGlucose.value} <span className="text-xs font-normal text-[#64748B]">mg/dL</span></span>
+                        {latestGlucose?.value != null ? (
+                          <span>
+                            {latestGlucose.value}{" "}
+                            <span className="text-xs font-normal text-[#64748B]">mg/dL</span>
+                          </span>
                         ) : (
-                          <span>138 <span className="text-xs font-normal text-[#64748B]">mg/dL</span></span>
+                          <span className="text-xs text-[#94A3B8]">Not recorded</span>
                         )}
                       </div>
-                      <div className="text-[10px] text-[#64748B] font-medium mt-0.5">
-                        Target 70-130
+                      <div
+                        className={`text-[10px] font-medium mt-0.5 ${
+                          latestGlucose?.value != null
+                            ? Number(latestGlucose.value) > 130
+                              ? "text-[#92400E]"
+                              : Number(latestGlucose.value) < 70
+                              ? "text-[#DC2626]"
+                              : "text-[#2F7D78]"
+                            : "text-[#64748B]"
+                        }`}
+                      >
+                        {latestGlucose?.value != null
+                          ? Number(latestGlucose.value) > 130
+                            ? `Above target (>130)${latestGlucose.obs_date ? ` • ${latestGlucose.obs_date}` : ""}`
+                            : Number(latestGlucose.value) < 70
+                            ? `Low glucose alert${latestGlucose.obs_date ? ` • ${latestGlucose.obs_date}` : ""}`
+                            : `Within target range${latestGlucose.obs_date ? ` • ${latestGlucose.obs_date}` : ""}`
+                          : "Target 70-130 mg/dL"}
                       </div>
                     </div>
                   </div>
@@ -1073,21 +1474,59 @@ export default function DoctorPatientRecordPage({
                         Serum Creatinine
                       </span>
                       <span className="text-xs font-bold text-[#0F172A]">
-                        {latestCreatinine?.value ? `${latestCreatinine.value} mg/dL` : "0.9 mg/dL"}
+                        {latestCreatinine?.value != null ? (
+                          `${latestCreatinine.value} mg/dL`
+                        ) : (
+                          <span className="text-xs text-[#94A3B8]">Not recorded</span>
+                        )}
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
-                        Normal
-                      </span>
-                      <span className="text-[10px] text-[#64748B] block mt-0.5">eGFR &gt;90 mL/min</span>
+                      {latestCreatinine?.value != null ? (
+                        <>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              Number(latestCreatinine.value) <= 1.2
+                                ? "bg-[#E8F6F4] text-[#2F7D78]"
+                                : "bg-[#FEF3C7] text-[#92400E]"
+                            }`}
+                          >
+                            {Number(latestCreatinine.value) <= 1.2 ? "Normal" : "Elevated"}
+                          </span>
+                          <span className="text-[10px] text-[#64748B] block mt-0.5">
+                            {latestCreatinine.obs_date || "Verified Lab Reading"}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-medium">
+                            No Lab Data
+                          </span>
+                          <span className="text-[10px] text-[#64748B] block mt-0.5">
+                            Normal: 0.6 - 1.2 mg/dL
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="pt-3 mt-3 border-t border-[#DCE4ED] flex items-center justify-between text-xs">
                   <span className="text-[#64748B] font-medium flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-[#2F7D78]" /> Verified Laboratory Readings
+                    {observations.length > 0 ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#2F7D78]" />
+                        <span>
+                          {observations.length} Recorded Observation
+                          {observations.length > 1 ? "s" : ""}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="w-3.5 h-3.5 text-[#94A3B8]" />
+                        <span className="text-[#94A3B8]">No clinical observations logged</span>
+                      </>
+                    )}
                   </span>
                   <button
                     onClick={() => scrollToSection("biomarkers")}
@@ -1195,7 +1634,7 @@ export default function DoctorPatientRecordPage({
                     <span className="text-[#334155]">
                       {observations.length > 0
                         ? `Total of ${observations.length} physiological observation records documented across ${medicalSummary.totalDocuments} clinical visits.`
-                        : "Baseline vitals recorded. Periodic ambulatory follow-up advised."}
+                        : "No physiological biomarker observations recorded in database yet. Periodic clinical follow-up and baseline diagnostic panel advised."}
                     </span>
                   </div>
                 </div>
@@ -1273,44 +1712,52 @@ export default function DoctorPatientRecordPage({
                   <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col justify-between gap-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-[11px] font-bold text-[#64748B] uppercase">HbA1c Glycated</span>
+                        <span className="text-[11px] font-bold text-[#64748B] uppercase">
+                          HbA1c Glycated
+                        </span>
                         <div className="flex items-baseline gap-1 mt-0.5">
-                          <span className="text-xl font-bold text-[#0F172A]">
-                            {latestHba1c?.value ? `${latestHba1c.value}%` : "7.4%"}
-                          </span>
+                          {latestHba1c?.value != null ? (
+                            <span className="text-xl font-bold text-[#0F172A]">
+                              {latestHba1c.value}%
+                            </span>
+                          ) : (
+                            <span className="text-xl font-bold text-[#94A3B8]">--</span>
+                          )}
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
-                        Target &lt; 7.0
-                      </span>
+                      {latestHba1c?.value != null ? (
+                        Number(latestHba1c.value) > 7.0 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
+                            Target &lt; 7.0%
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
+                            Optimal &lt; 7.0%
+                          </span>
+                        )
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-semibold">
+                          Target &lt; 7.0%
+                        </span>
+                      )}
                     </div>
 
-                    {/* Vector Sparkline Chart */}
-                    <div className="w-full h-24 relative flex items-end">
-                      <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 200 80">
-                        {/* Target band */}
-                        <rect className="text-[#E8F6F4]" fill="currentColor" height="30" width="200" x="0" y="50" />
-                        <line className="text-[#A7E9DF]" stroke="currentColor" strokeDasharray="3,3" strokeWidth="1" x1="0" x2="200" y1="50" y2="50" />
-                        <text className="text-[#2F7D78]" fill="currentColor" fontSize="8" x="5" y="46">Target &lt; 7.0%</text>
-                        {/* Trend line */}
-                        <polyline
-                          className="text-[#2F7D78]"
-                          fill="none"
-                          points="20,45 100,38 180,25"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2.5"
-                        />
-                        <circle className="text-[#2F7D78]" cx="20" cy="45" fill="currentColor" r="3.5" />
-                        <circle className="text-[#2F7D78]" cx="100" cy="38" fill="currentColor" r="3.5" />
-                        <circle className="text-[#2F7D78]" cx="180" cy="25" fill="currentColor" r="4" />
-                      </svg>
-                    </div>
+                    {/* Dynamic Vector Sparkline Chart */}
+                    <DynamicSparkline
+                      points={filteredHba1c}
+                      color="#2F7D78"
+                      targetValue={7.0}
+                      targetLabel="Target < 7.0%"
+                      emptyMessage="No HbA1c lab results recorded in database"
+                    />
 
                     <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
-                      <span>Baseline: 7.8%</span>
-                      <span>Latest: {latestHba1c?.value ? `${latestHba1c.value}%` : "7.4%"}</span>
+                      <span>
+                        Baseline: {baselineHba1c ? `${baselineHba1c.value}%` : "Not recorded"}
+                      </span>
+                      <span>
+                        Latest: {currentHba1c ? `${currentHba1c.value}%` : "Not recorded"}
+                      </span>
                     </div>
                   </div>
 
@@ -1318,42 +1765,58 @@ export default function DoctorPatientRecordPage({
                   <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col justify-between gap-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-[11px] font-bold text-[#64748B] uppercase">Fasting Glucose</span>
+                        <span className="text-[11px] font-bold text-[#64748B] uppercase">
+                          Fasting Glucose
+                        </span>
                         <div className="flex items-baseline gap-1 mt-0.5">
-                          <span className="text-xl font-bold text-[#0F172A]">
-                            {latestGlucose?.value || "138"}
-                          </span>
-                          <span className="text-[11px] text-[#64748B]">mg/dL</span>
+                          {latestGlucose?.value != null ? (
+                            <>
+                              <span className="text-xl font-bold text-[#0F172A]">
+                                {latestGlucose.value}
+                              </span>
+                              <span className="text-[11px] text-[#64748B]">mg/dL</span>
+                            </>
+                          ) : (
+                            <span className="text-xl font-bold text-[#94A3B8]">--</span>
+                          )}
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#475569] text-[10px] font-semibold">
-                        Goal 70-130
-                      </span>
+                      {latestGlucose?.value != null ? (
+                        Number(latestGlucose.value) > 130 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
+                            Above Goal
+                          </span>
+                        ) : Number(latestGlucose.value) < 70 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#FEE2E2] text-[#DC2626] text-[10px] font-bold">
+                            Low Alert
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
+                            In Target
+                          </span>
+                        )
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-semibold">
+                          Goal 70-130
+                        </span>
+                      )}
                     </div>
 
-                    {/* Vector Sparkline Chart */}
-                    <div className="w-full h-24 relative flex items-end">
-                      <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 200 80">
-                        <rect className="text-[#E8F6F4]" fill="currentColor" height="28" width="200" x="0" y="52" />
-                        <line className="text-[#A7E9DF]" stroke="currentColor" strokeDasharray="3,3" strokeWidth="1" x1="0" x2="200" y1="52" y2="52" />
-                        <polyline
-                          className="text-[#2F7D78]"
-                          fill="none"
-                          points="20,44 100,35 180,28"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2.5"
-                        />
-                        <circle className="text-[#2F7D78]" cx="20" cy="44" fill="currentColor" r="3.5" />
-                        <circle className="text-[#2F7D78]" cx="100" cy="35" fill="currentColor" r="3.5" />
-                        <circle className="text-[#2F7D78]" cx="180" cy="28" fill="currentColor" r="4" />
-                      </svg>
-                    </div>
+                    {/* Dynamic Vector Sparkline Chart */}
+                    <DynamicSparkline
+                      points={filteredGlucose}
+                      color="#2F7D78"
+                      targetBand={{ min: 70, max: 130 }}
+                      emptyMessage="No fasting glucose readings recorded in database"
+                    />
 
                     <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
-                      <span>Baseline: 155</span>
-                      <span>Current: {latestGlucose?.value || "138"}</span>
+                      <span>
+                        Baseline: {baselineGlucose ? `${baselineGlucose.value} mg/dL` : "Not recorded"}
+                      </span>
+                      <span>
+                        Current: {currentGlucose ? `${currentGlucose.value} mg/dL` : "Not recorded"}
+                      </span>
                     </div>
                   </div>
 
@@ -1361,52 +1824,57 @@ export default function DoctorPatientRecordPage({
                   <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col justify-between gap-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-[11px] font-bold text-[#64748B] uppercase">Blood Pressure</span>
+                        <span className="text-[11px] font-bold text-[#64748B] uppercase">
+                          Blood Pressure
+                        </span>
                         <div className="flex items-baseline gap-1 mt-0.5">
-                          <span className="text-xl font-bold text-[#0F172A]">
-                            {latestBp?.systolic && latestBp?.diastolic ? `${latestBp.systolic}/${latestBp.diastolic}` : "130/84"}
-                          </span>
-                          <span className="text-[11px] text-[#64748B]">mmHg</span>
+                          {latestBp?.systolic && latestBp?.diastolic ? (
+                            <>
+                              <span className="text-xl font-bold text-[#0F172A]">
+                                {latestBp.systolic}/{latestBp.diastolic}
+                              </span>
+                              <span className="text-[11px] text-[#64748B]">mmHg</span>
+                            </>
+                          ) : (
+                            <span className="text-xl font-bold text-[#94A3B8]">-- / --</span>
+                          )}
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
-                        Controlled
-                      </span>
+                      {latestBp?.systolic && latestBp?.diastolic ? (
+                        latestBp.systolic >= 140 || latestBp.diastolic >= 90 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#FEE2E2] text-[#DC2626] text-[10px] font-bold">
+                            Stage 2 HTN
+                          </span>
+                        ) : latestBp.systolic >= 130 || latestBp.diastolic >= 80 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
+                            Stage 1 HTN
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
+                            Controlled
+                          </span>
+                        )
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-semibold">
+                          Goal &lt; 130/80
+                        </span>
+                      )}
                     </div>
 
-                    {/* Dual-Line Vector Chart */}
-                    <div className="w-full h-24 relative flex items-end">
-                      <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 200 80">
-                        {/* Systolic Line */}
-                        <polyline
-                          className="text-[#2F7D78]"
-                          fill="none"
-                          points="20,35 100,30 180,22"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeWidth="2"
-                        />
-                        {/* Diastolic Line */}
-                        <polyline
-                          className="text-[#2874B5]"
-                          fill="none"
-                          points="20,60 100,56 180,50"
-                          stroke="currentColor"
-                          strokeDasharray="2,2"
-                          strokeLinecap="round"
-                          strokeWidth="2"
-                        />
-                        <circle className="text-[#2F7D78]" cx="180" cy="22" fill="currentColor" r="3.5" />
-                        <circle className="text-[#2874B5]" cx="180" cy="50" fill="currentColor" r="3.5" />
-                      </svg>
-                    </div>
+                    {/* Dynamic Dual-Line Vector Chart */}
+                    <DualBpSparkline
+                      points={filteredBp}
+                      emptyMessage="No blood pressure observations recorded in database"
+                    />
 
                     <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
                       <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D78]" /> Sys: {latestBp?.systolic || 130}
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D78]" />
+                        <span>Sys: {currentBp?.systolic != null ? currentBp.systolic : "--"}</span>
                       </span>
                       <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#2874B5]" /> Dia: {latestBp?.diastolic || 84}
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#2874B5]" />
+                        <span>Dia: {currentBp?.diastolic != null ? currentBp.diastolic : "--"}</span>
                       </span>
                     </div>
                   </div>
@@ -1511,96 +1979,8 @@ export default function DoctorPatientRecordPage({
               </div>
             </div>
 
-            {/* RIGHT COLUMN (4 cols): Allergies, Prescription Regimen, and Consolidated Docs */}
+            {/* RIGHT COLUMN (4 cols): Consolidated Documents */}
             <div className="lg:col-span-4 flex flex-col gap-6">
-              {/* Dedicated Allergies & Adverse Reactions Card */}
-              <div id="allergies" className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-[#92400E]" />
-                    <h3 className="text-sm font-bold text-[#0F172A]">Allergies & Hypersensitivity</h3>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] text-[11px] font-bold">
-                    {patientAllergies ? "1 Recorded" : "0 Recorded"}
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {patientAllergies ? (
-                    <div className="p-3 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col gap-1.5 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#DC2626]">{patientAllergies}</span>
-                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#FEE2E2] text-[#DC2626] font-semibold">
-                          Active Alert
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-[#64748B] space-y-0.5 mt-1">
-                        <p><strong className="text-[#0F172A]">Type:</strong> Patient Reported Sensitivity</p>
-                        <p><strong className="text-[#0F172A]">Status:</strong> Documented in Intake Dossier</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-[#64748B] italic">No allergies declared.</p>
-                  )}
-                </div>
-
-                {/* Clinical Guardrail Box */}
-                <div className="p-2.5 rounded-lg bg-[#F1F5F9] text-[11px] text-[#64748B] leading-tight border border-[#DCE4ED]">
-                  <strong className="text-[#0F172A]">Clinical Safety Rule:</strong> Exercise clinical discretion and verify allergy history with patient before prescribing cross-reactive antimicrobial classes.
-                </div>
-              </div>
-
-              {/* Prescription Regimen Card */}
-              <div id="medicines" className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Pill className="w-4 h-4 text-[#2F7D78]" />
-                    <h3 className="text-sm font-bold text-[#0F172A]">Prescription Regimen</h3>
-                  </div>
-                  <span className="text-xs font-mono text-[#64748B]">
-                    {medications.active.length} Active
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {medications.active.length > 0 ? (
-                    medications.active.map((med) => (
-                      <div key={med.id} className="p-3 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col gap-2 text-xs">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <span className="font-bold text-[#0F172A] block">{med.name}</span>
-                            <span className="text-[11px] font-medium text-[#2F7D78]">
-                              {med.strength || "Standard"} • {med.route || "Oral"}
-                            </span>
-                          </div>
-                          <span className="px-2 py-0.5 rounded-full bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
-                            Active
-                          </span>
-                        </div>
-
-                        <div className="text-[11px] text-[#64748B] space-y-0.5">
-                          <div className="flex justify-between">
-                            <span>Regimen:</span>
-                            <span className="font-semibold text-[#0F172A]">{med.frequency || "Daily"}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Prescriber:</span>
-                            <span>{med.doctor || "Attending Doctor"}</span>
-                          </div>
-                          {med.start_date && (
-                            <div className="flex justify-between font-mono">
-                              <span>Start Date:</span>
-                              <span>{med.start_date}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-[#64748B] italic">No active prescriptions.</p>
-                  )}
-                </div>
-              </div>
 
               {/* Consolidated Documents Card */}
               <div id="documents" className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex flex-col gap-4">
@@ -1615,38 +1995,42 @@ export default function DoctorPatientRecordPage({
                 </div>
 
                 <div className="space-y-2">
-                  {documents.slice(0, 5).map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="p-2.5 rounded-lg bg-[#F7F9FB] hover:bg-[#F1F5F9] transition-colors border border-[#DCE4ED] flex items-center justify-between gap-2"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-8 h-8 rounded bg-white text-[#2874B5] border border-[#DCE4ED] flex items-center justify-center shrink-0">
-                          <FileText className="w-4 h-4" />
-                        </div>
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-[#0F172A] truncate">
-                            {doc.originalName}
-                          </span>
-                          <div className="flex items-center gap-1.5 text-[11px] text-[#64748B] font-mono">
-                            <span>{new Date(doc.uploadedAt).toLocaleDateString()}</span>
-                            <span>•</span>
-                            <span className={!doc.isDraft ? "text-[#2F7D78] font-semibold" : "text-[#92400E]"}>
-                              {!doc.isDraft ? "Confirmed" : "OCR Draft"}
+                  {documents.length > 0 ? (
+                    documents.slice(0, 8).map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="p-2.5 rounded-lg bg-[#F7F9FB] hover:bg-[#F1F5F9] transition-colors border border-[#DCE4ED] flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded bg-white text-[#2874B5] border border-[#DCE4ED] flex items-center justify-center shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-bold text-[#0F172A] truncate">
+                              {doc.originalName}
                             </span>
+                            <div className="flex items-center gap-1.5 text-[11px] text-[#64748B] font-mono">
+                              <span>{new Date(doc.uploadedAt).toLocaleDateString()}</span>
+                              <span>•</span>
+                              <span className={!doc.isDraft ? "text-[#2F7D78] font-semibold" : "text-[#92400E]"}>
+                                {!doc.isDraft ? "Confirmed" : "OCR Draft"}
+                              </span>
+                            </div>
                           </div>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocForModal(doc)}
+                          className="p-1 text-[#64748B] hover:text-[#2F7D78] transition-colors cursor-pointer"
+                          title="View Document"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDocForModal(doc)}
-                        className="p-1 text-[#64748B] hover:text-[#2F7D78] transition-colors"
-                        title="View Document"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-xs text-[#64748B] italic p-3">No documents uploaded yet.</p>
+                  )}
                 </div>
               </div>
             </div>

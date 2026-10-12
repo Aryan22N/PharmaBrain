@@ -114,7 +114,6 @@ export async function GET(
           patient.patientId,
           patient.legacyPatientId,
           String(patient.id),
-          '483027156', // Backward-compatibility mapping for Rahul Sharma if matches
         ].filter((id): id is string => Boolean(id))
       )
     );
@@ -249,10 +248,74 @@ export async function GET(
       [patientIds]
     );
 
+    // Merge any vitals parsed in documents that aren't yet in observations table
+    const combinedObs: ObservationRecordRow[] = [...rawObs];
+    formattedDocuments.forEach((doc) => {
+      const sr = (doc.structuredResult || {}) as Record<string, unknown>;
+      const docVitals = Array.isArray(sr.vitals) ? sr.vitals : [];
+      const docDate = (sr.dateIso as string) || (doc.uploadedAt ? new Date(doc.uploadedAt).toISOString().split('T')[0] : null);
+
+      docVitals.forEach((v: any, idx: number) => {
+        if (!v || typeof v !== 'object') return;
+        const parsed = v.parsed || {};
+        let kind = v.kind;
+        const vName = (v.name || '').toLowerCase();
+        if (!kind) {
+          if (vName.includes('bp') || vName.includes('blood pressure')) kind = 'bp';
+          else if (vName.includes('pulse') || vName.includes('pr') || vName.includes('hr')) kind = 'pulse';
+          else if (vName.includes('spo2') || vName.includes('o2')) kind = 'spo2';
+          else if (vName.includes('temp')) kind = 'temp';
+          else if (vName.includes('hba1c') || vName.includes('a1c')) kind = 'hba1c';
+          else if (vName.includes('fbs') || vName.includes('fasting')) kind = 'sugar_fasting';
+          else if (vName.includes('sugar') || vName.includes('rbs') || vName.includes('glucose')) kind = 'sugar_random';
+          else if (vName.includes('weight') || vName.includes('wt')) kind = 'weight';
+          else if (vName.includes('bmi')) kind = 'bmi';
+          else if (vName.includes('creatinine')) kind = 'creatinine';
+          else return;
+        }
+
+        let sys = parsed.systolic ?? null;
+        let dia = parsed.diastolic ?? null;
+        let val = parsed.value ?? null;
+        const uStr = parsed.unit ?? (kind === 'bp' ? 'mmHg' : '');
+
+        if (kind === 'bp' && (sys === null || dia === null)) {
+          const m = String(v.value || '').match(/(\d{2,3})\s*\/\s*(\d{2,3})/);
+          if (m) {
+            sys = Number(m[1]);
+            dia = Number(m[2]);
+          }
+        } else if (val === null && v.value) {
+          const mVal = String(v.value).match(/(\d+(?:\.\d+)?)/);
+          if (mVal) val = Number(mVal[1]);
+        }
+
+        const alreadyExists = combinedObs.some(
+          (o) => o.prescription_id === doc.id || (o.obs_date === docDate && o.kind === kind)
+        );
+        if (!alreadyExists && (sys != null || val != null)) {
+          combinedObs.push({
+            id: 100000 + doc.id * 10 + idx,
+            patient_id: patient.patientId || String(patient.id),
+            prescription_id: doc.id,
+            obs_date: docDate,
+            kind,
+            systolic: sys,
+            diastolic: dia,
+            value: val,
+            unit: uStr,
+            raw_text: `${v.name || ''} ${v.value || ''}`.trim(),
+            created_at: doc.uploadedAt,
+          });
+        }
+      });
+    });
+    combinedObs.sort((a, b) => new Date(a.obs_date || '1970-01-01').getTime() - new Date(b.obs_date || '1970-01-01').getTime());
+
     // 4.4 Longitudinal Trends
     const trends = calculatePatientTrends(
       patient.patientId || String(patient.id),
-      rawObs,
+      combinedObs,
       documents
     );
 
@@ -271,6 +334,33 @@ export async function GET(
     );
 
     const onboarding = onboardingRows[0] || null;
+
+    // 4.6 Query Patient Conditions & Allergies from DB tables
+    let dbConditions: any[] = [];
+    try {
+      dbConditions = await query(
+        `SELECT id, condition_name, icd10_code, category, status, diagnosed_date, severity, doctor, facility, notes
+         FROM patient_conditions
+         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         ORDER BY CASE WHEN status = 'ACTIVE' THEN 0 ELSE 1 END, diagnosed_date DESC NULLS LAST, id DESC;`,
+        [patientIds, patient.id]
+      );
+    } catch (e) {
+      console.warn("Could not query patient_conditions:", e);
+    }
+
+    let dbAllergies: any[] = [];
+    try {
+      dbAllergies = await query(
+        `SELECT id, allergen, category, reaction, severity, status, source, verification_status, added_date, notes
+         FROM patient_allergies
+         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         ORDER BY id DESC;`,
+        [patientIds, patient.id]
+      );
+    } catch (e) {
+      console.warn("Could not query patient_allergies:", e);
+    }
 
     // 5. Assemble and Return Complete Authorized Medical Dossier
     return NextResponse.json({
@@ -297,7 +387,7 @@ export async function GET(
         confirmedPrescriptionsCount: formattedDocuments.filter((d) => !d.isDraft).length,
         draftPrescriptionsCount: formattedDocuments.filter((d) => d.isDraft).length,
         activeMedicationsCount: activeMedicines.length,
-        totalObservationsCount: rawObs.length,
+        totalObservationsCount: combinedObs.length,
       },
       documents: formattedDocuments,
       medications: {
@@ -306,8 +396,10 @@ export async function GET(
         needsReview: reviewMedicines,
         total: medRows.length,
       },
-      observations: rawObs,
+      observations: combinedObs,
       longitudinalTrends: trends,
+      conditions: dbConditions,
+      allergies: dbAllergies,
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Server error occurred';

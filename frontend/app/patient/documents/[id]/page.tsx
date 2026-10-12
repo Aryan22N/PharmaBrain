@@ -32,6 +32,8 @@ import {
   FileImage,
   Pill,
   Check,
+  Lock,
+  ArrowRight,
   Trash2,
 } from "lucide-react";
 
@@ -115,7 +117,7 @@ export default function PatientDocumentDetailPage({
       return;
     }
 
-    const currentPatientId = record.patient?.uhid?.trim() || payload.patient_id || "483027156";
+    const currentPatientId = record.patient?.uhid?.trim() || payload.patient_id || "";
 
     const updatedRecord: PrescriptionRecord = {
       ...record,
@@ -135,15 +137,34 @@ export default function PatientDocumentDetailPage({
     setConfirming(true);
 
     try {
+      const targetExtractionId = payload.extraction_id || Number(id);
       const result = await clientApi.confirmExtraction(
-        payload.extraction_id,
+        targetExtractionId,
         updatedRecord,
         confirmedBy,
         allowDuplicate
       );
+
+      // Also call direct doc confirm endpoint if id is numeric to ensure both tables are updated
+      try {
+        const cleanDocId = Number(String(id).replace(/^doc-/, ""));
+        if (!isNaN(cleanDocId) && cleanDocId > 0 && cleanDocId !== targetExtractionId) {
+          const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+          await fetch(`/api/patient/documents/${cleanDocId}/confirm`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+        }
+      } catch (_) {}
+
       setConfirmSuccess(result);
       setError(null);
       setPayload((prev) => (prev ? { ...prev, status: "CONFIRMED" } : null));
+
+      // Auto redirect to medical timeline after confirmation
+      setTimeout(() => {
+        router.push("/patient/timeline");
+      }, 1800);
     } catch (err: any) {
       if (err.status === 409 && err.message?.includes("duplicate")) {
         setDuplicateWarning(err.message);
@@ -157,6 +178,9 @@ export default function PatientDocumentDetailPage({
           observations_saved: 0,
           observations_skipped: [],
         });
+        setTimeout(() => {
+          router.push("/patient/timeline");
+        }, 1800);
       } else {
         setError(err.message || "Failed to confirm prescription.");
       }
@@ -222,9 +246,9 @@ export default function PatientDocumentDetailPage({
       <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link
-            href="/patient/documents"
+            href="/patient/timeline"
             className="p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-colors border border-slate-200"
-            title="Return to Documents Vault"
+            title="Return to Medical Timeline"
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
@@ -234,13 +258,20 @@ export default function PatientDocumentDetailPage({
                 Medical Document #{payload.extraction_id}
               </h1>
               <span
-                className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
                   isConfirmed
                     ? "text-emerald-700 bg-emerald-50 border border-emerald-200"
                     : "text-amber-800 bg-amber-50 border border-amber-300"
                 }`}
               >
-                {isConfirmed ? "Prescription Verified" : "Draft Summary"}
+                {isConfirmed ? (
+                  <>
+                    <Lock className="w-3 h-3 text-emerald-600" />
+                    <span>Prescription Verified & Locked</span>
+                  </>
+                ) : (
+                  <span>Draft Summary (Awaiting Confirmation)</span>
+                )}
               </span>
               <GateBadge gate={payload.gate} />
             </div>
@@ -281,19 +312,55 @@ export default function PatientDocumentDetailPage({
 
       <MedicalDisclaimer compact />
 
+      {/* Confirmed & Locked Status Banner */}
+      {isConfirmed && !confirmSuccess && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold block text-emerald-950 flex items-center gap-1.5">
+                <span>Document Confirmed & Locked</span>
+                <span className="text-[10px] bg-emerald-200/80 text-emerald-900 px-2 py-0.2 rounded-full font-mono font-semibold">READ-ONLY</span>
+              </span>
+              <span className="text-[11px] text-emerald-800">
+                This prescription is permanently verified and recorded in your medical timeline and health record. Review & submit is disabled because this document is confirmed.
+              </span>
+            </div>
+          </div>
+          <Link
+            href="/patient/timeline"
+            className="px-4 py-2 rounded-xl bg-[#008080] hover:bg-[#006666] text-white text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Return to Medical Timeline</span>
+          </Link>
+        </div>
+      )}
+
       {/* Confirmation Success Banner */}
       {confirmSuccess && (
-        <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs shadow-xs space-y-2">
+        <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs shadow-xs space-y-3">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
             <div>
               <h3 className="text-sm font-bold text-emerald-950">
-                Prescription Confirmed & Saved to Patient Summary!
+                Prescription Confirmed, Locked & Saved to Medical Timeline!
               </h3>
               <p className="text-xs text-emerald-800 mt-0.5">
-                Saved under Patient ID: <strong className="font-mono text-emerald-900">{confirmSuccess.patient_id}</strong>
+                Saved under Patient ID: <strong className="font-mono text-emerald-900">{confirmSuccess.patient_id || patientId}</strong>. Redirecting to your timeline...
               </p>
             </div>
+          </div>
+          <div className="pt-1">
+            <Link
+              href="/patient/timeline"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#008080] hover:bg-[#006666] text-white text-xs font-bold transition-colors shadow-xs"
+            >
+              <span>View in Medical Timeline Now</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         </div>
       )}
@@ -447,6 +514,30 @@ export default function PatientDocumentDetailPage({
                   <span>{confirming ? "Saving Record..." : "Confirm & Save to Record"}</span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Confirmed Footer Bar */}
+          {isConfirmed && (
+            <div className="p-4 rounded-2xl bg-white border border-emerald-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <span className="text-xs font-bold text-slate-900 block">
+                    Verified Medical Record
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    This document is locked and saved to your medical timeline. Review and submit is disabled.
+                  </span>
+                </div>
+              </div>
+              <Link
+                href="/patient/timeline"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#008080] hover:bg-[#006666] text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Return to Medical Timeline</span>
+              </Link>
             </div>
           )}
         </div>

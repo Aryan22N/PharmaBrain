@@ -182,7 +182,7 @@ export default function MedicalTimelinePage() {
                 <span>{discardingId === pendingDocuments[0].id ? "Discarding..." : "Discard Draft"}</span>
               </button>
               <Link
-                href={`/patient/documents/${pendingDocuments[0].id}`}
+                href={`/patient/documents/${pendingDocuments[0].extractionId || pendingDocuments[0].id}`}
                 className="px-4 py-2 rounded-xl bg-[#008080] hover:bg-[#006666] text-white text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -268,12 +268,18 @@ export default function MedicalTimelinePage() {
         {filteredTimeline.map((ev, idx) => {
           const isConflicting = ev.is_conflicting;
           const isHighlight = ev.source === "Prescription Scan" || ev.source === "Hospital HMS";
+          const isConfirmedEvent =
+            ev.status === "CONFIRMED" ||
+            ev.verification_status === "Prescription Verified" ||
+            ev.verification_status === "Hospital Verified";
+
           const isUnconfirmedDraft =
-            ev.verification_status === "Awaiting Review" ||
-            ev.verification_status === "NOT CONFIRMED" ||
-            ev.status === "NOT CONFIRMED" ||
-            ev.status === "PENDING" ||
-            ev.source === "Uploaded Document";
+            !isConfirmedEvent &&
+            (ev.verification_status === "Awaiting Review" ||
+              ev.verification_status === "NOT CONFIRMED" ||
+              ev.status === "NOT CONFIRMED" ||
+              ev.status === "PENDING" ||
+              ev.source === "Uploaded Document");
 
           const rawTargetId = String(ev.extraction_id || ev.document_id || ev.id).replace(/^doc-/, "");
 
