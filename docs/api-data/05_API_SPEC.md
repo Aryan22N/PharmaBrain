@@ -447,3 +447,59 @@ Confirms a reviewed conflict or dosage change:
 - `/api/user/dashboard` resolves `imageUrl` for each prescription card. If a full Supabase URL is present, it is served directly without prepending `/uploads/`.
 - Dual-engine fallback: If Supabase JS client fails, `frontend/lib/supabaseStorage.ts` attempts native HTTP REST API, and falls back to containerized disk `/app/public/uploads` with Next.js user permissions.
 
+---
+
+### Doctor Portal & Consent Access Control Endpoints
+
+#### `POST /api/doctor/lookup-patient`
+Doctor queries the hospital patient directory by official identifier (`P-XXXXXXXXX`):
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Input**: `{ "patientId": "P-XXXXXXXXX" }`.
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "doctor": { "id": 43, "doctorId": "D-631594818", "name": "Dr. Swayam" },
+    "patient": {
+      "id": 42,
+      "name": "arn",
+      "patientId": "P-640391468",
+      "legacyPatientId": null,
+      "accountRegisteredAt": "...",
+      "status": "REGISTERED_IN_DIRECTORY"
+    },
+    "authorization": {
+      "hasClinicalAccess": false,
+      "status": "PENDING" | "APPROVED" | "NOT_REQUESTED" | "REVOKED",
+      "requestId": 12,
+      "message": "..."
+    }
+  }
+  ```
+- **Error Codes**: `400 INVALID_PATIENT_ID_FORMAT`, `404 PATIENT_NOT_FOUND`, `401 Unauthorized`, `403 Forbidden (Non-Doctor)`.
+
+#### `POST /api/doctor/access-requests`
+Doctor initiates a clinical records consultation request to a patient:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Input**: `{ "patientId": "P-XXXXXXXXX", "reason": "Clinical review" }`.
+- **Response**: `{ "success": true, "status": "PENDING", "requestId": 12, "message": "..." }` (`201 Created`).
+
+#### `GET /api/doctor/access-requests`
+Doctor retrieves audit log of all access requests initiated from their account:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Response**: `{ "success": true, "requests": [ { "id": 12, "patientCode": "P-...", "patientName": "...", "status": "PENDING", ... } ] }`.
+
+#### `GET /api/doctor/patients/[patientId]/records`
+Doctor retrieves complete authorized medical dossier for an approved patient:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Access Control Enforcement**: Queries `patient_access_requests` where `doctor_id = doctor.id AND patient_id = patient.id AND status = 'APPROVED'`.
+- **Strict Guard**: If no active `APPROVED` record exists, immediately returns `403 Forbidden` (`authorized: false`). Knowing a patient ID never grants unauthorized clinical access.
+- **Payload**: Full structured medical record including:
+  - `patient`: Basic demographics, allergies, onboarded history.
+  - `medicalSummary`: Document counts, confirmed vs draft counts, active medications count.
+  - `documents`: Document list with `clinicalVerification` (`Clinician Confirmed` vs `OCR Draft (Unconfirmed)`).
+  - `medications`: Filtered into `active`, `history`, and `needsReview` (conflicts).
+  - `observations`: Time-series vitals (blood pressure, glucose, HbA1c, etc.).
+  - `longitudinalTrends`: Statistical trends and trajectory.
+
+
