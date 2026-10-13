@@ -53,3 +53,9 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 Thumbs.db
+
+# Agents, skills, and Archify artifacts
+.agents/
+.archify/
+skills-lock.json
+
