@@ -147,6 +147,8 @@ curl -X POST http://localhost:8000/ocr \
 | 500 | OCR inference failed |
 | 502 | All Gemini models failed |
 
+**Retry behavior:** If the same image is uploaded again for the same patient, the service returns its existing non-discarded extraction when one exists. If OCR was saved but no extraction was created because structuring failed, it reuses the saved OCR lines and retries structuring with the newly uploaded image. This makes retries safe after network interruptions without creating another extraction for an already completed upload.
+
 ---
 
 ### `POST /api/ocr` — Direct OCR (no auth, no LLM)
@@ -375,7 +377,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 
 | Route | Method | Proxies to Python | Notes |
 |---|---|---|---|
-| `/api/ocr` | POST | `POST /ocr` | Uploads image to Supabase Storage Bucket (`OCR_Images/uploads/`), checks SHA256 duplicate image hash, creates `Document` & `Analysis` records, returns `image_url` |
+| `/api/ocr` | POST | `POST /ocr` | Uploads the image, resumes an identical prior attempt or returns its existing extraction, idempotently persists the `Document` & `Analysis` by extraction ID, and returns `image_url` |
 | `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, marks `source = 'Prescription Scan'`, `verification_status = 'Prescription Verified'`, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, mirrors vitals to `observations` table |
 | `/api/discard/[id]` | POST | `POST /discard/{id}` | Purges draft from PostgreSQL (`Document`, `Analysis`, and unconfirmed `patient_timeline_events`), and notifies Python backend |
 | `/api/extractions/[id]` | GET | `GET /extractions/{id}` | Fetches extraction draft from Python backend, with resilient fallback to PostgreSQL `Document` & `Analysis` tables if Python memory cache has expired |
@@ -393,7 +395,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | `/api/auth` | POST | — | Login/register, returns JWT cookie |
 | `/api/user` | GET | — | Current user info from DB |
 | `/api/user/onboarding` | POST, GET | — | Saves & retrieves patient initial profile context (`patient_onboarding` table) |
-| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl` |
+| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl`. Sends `Cache-Control: no-store`; the patient client also fetches with `cache: no-store` so confirmation state is refreshed from the server. |
 | `/api/user/save-ocr` | POST | — | Direct helper to persist confirmed OCR payload into `Document` and `Analysis` tables |
 
 ---
@@ -446,4 +448,60 @@ Confirms a reviewed conflict or dosage change:
 - `/api/ocr` returns `image_url` containing the direct public CDN URL.
 - `/api/user/dashboard` resolves `imageUrl` for each prescription card. If a full Supabase URL is present, it is served directly without prepending `/uploads/`.
 - Dual-engine fallback: If Supabase JS client fails, `frontend/lib/supabaseStorage.ts` attempts native HTTP REST API, and falls back to containerized disk `/app/public/uploads` with Next.js user permissions.
+
+---
+
+### Doctor Portal & Consent Access Control Endpoints
+
+#### `POST /api/doctor/lookup-patient`
+Doctor queries the hospital patient directory by official identifier (`P-XXXXXXXXX`):
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Input**: `{ "patientId": "P-XXXXXXXXX" }`.
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "doctor": { "id": 43, "doctorId": "D-631594818", "name": "Dr. Swayam" },
+    "patient": {
+      "id": 42,
+      "name": "arn",
+      "patientId": "P-640391468",
+      "legacyPatientId": null,
+      "accountRegisteredAt": "...",
+      "status": "REGISTERED_IN_DIRECTORY"
+    },
+    "authorization": {
+      "hasClinicalAccess": false,
+      "status": "PENDING" | "APPROVED" | "NOT_REQUESTED" | "REVOKED",
+      "requestId": 12,
+      "message": "..."
+    }
+  }
+  ```
+- **Error Codes**: `400 INVALID_PATIENT_ID_FORMAT`, `404 PATIENT_NOT_FOUND`, `401 Unauthorized`, `403 Forbidden (Non-Doctor)`.
+
+#### `POST /api/doctor/access-requests`
+Doctor initiates a clinical records consultation request to a patient:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Input**: `{ "patientId": "P-XXXXXXXXX", "reason": "Clinical review" }`.
+- **Response**: `{ "success": true, "status": "PENDING", "requestId": 12, "message": "..." }` (`201 Created`).
+
+#### `GET /api/doctor/access-requests`
+Doctor retrieves audit log of all access requests initiated from their account:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Response**: `{ "success": true, "requests": [ { "id": 12, "patientCode": "P-...", "patientName": "...", "status": "PENDING", ... } ] }`.
+
+#### `GET /api/doctor/patients/[patientId]/records`
+Doctor retrieves complete authorized medical dossier for an approved patient:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Access Control Enforcement**: Queries `patient_access_requests` where `doctor_id = doctor.id AND patient_id = patient.id AND status = 'APPROVED'`.
+- **Strict Guard**: If no active `APPROVED` record exists, immediately returns `403 Forbidden` (`authorized: false`). Knowing a patient ID never grants unauthorized clinical access.
+- **Payload**: Full structured medical record including:
+  - `patient`: Basic demographics, allergies, onboarded history.
+  - `medicalSummary`: Document counts, confirmed vs draft counts, active medications count.
+  - `documents`: Document list with `clinicalVerification` (`Clinician Confirmed` vs `OCR Draft (Unconfirmed)`).
+  - `medications`: Filtered into `active`, `history`, and `needsReview` (conflicts).
+  - `observations`: Time-series vitals (blood pressure, glucose, HbA1c, etc.).
+  - `longitudinalTrends`: Statistical trends and trajectory.
+
 

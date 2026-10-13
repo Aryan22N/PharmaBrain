@@ -269,17 +269,77 @@ export async function GET(request: Request) {
       console.warn("Could not query observations:", e);
     }
 
-    // 6. Track timeline events and medicines directly from documents
+    // 6. Query Timeline Events & Recorded Medicines from database first
+    let timelineEvents: any[] = [];
+    let recordedMedicines: any[] = [];
+    try {
+      timelineEvents = await query(
+        `SELECT id, patient_id, user_id, event_date, category, title, description,
+                source, reliability, verification_status, facility, doctor, reference_id,
+                is_conflicting, conflict_details, created_at
+         FROM patient_timeline_events
+         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         ORDER BY event_date DESC, id DESC;`,
+        [patientIds, user.id]
+      );
+    } catch (tlErr) {
+      console.warn("Could not query patient_timeline_events:", tlErr);
+    }
+
+    try {
+      recordedMedicines = await query(
+        `SELECT id, patient_id, user_id, name, normalized_name, strength, status, indication,
+                frequency, route, start_date, expected_end_date, actual_end_date,
+                COALESCE(actual_end_date, expected_end_date) AS end_date,
+                duration_raw, duration_days, doctor, reference_id,
+                reconciliation_category, reconciliation_notes,
+                is_conflicting, conflict_details, source, reliability, verification_status, created_at
+         FROM patient_medications
+         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
+         ORDER BY CASE WHEN status = 'ACTIVE' THEN 0 ELSE 1 END, start_date DESC NULLS LAST, id DESC;`,
+        [patientIds, user.id]
+      );
+    } catch (medErr) {
+      console.warn("Could not query patient_medications:", medErr);
+    }
+
+    // Set of known verified reference IDs from patient_timeline_events
+    const verifiedRefIds = new Set<string>();
+    timelineEvents.forEach((ev) => {
+      if (ev.reference_id) verifiedRefIds.add(String(ev.reference_id).trim().toLowerCase());
+    });
+
+    // 7. Track timeline events and medicines directly from documents
     const docTimelineEvents: any[] = [];
     const docMedicines: any[] = [];
 
     documents.forEach((doc) => {
       const sr = doc.structuredResult || {};
       const docDate = sr.date_iso || (doc.uploadedAt ? new Date(doc.uploadedAt).toISOString().split('T')[0] : '2026-09-10');
-      const isConfirmed = doc.status === 'CONFIRMED';
       const facility = sr.hospital || "City Care Medical Centre";
       const doctor = typeof sr.doctor === 'string' ? sr.doctor : sr.doctor?.name || "Consulting Physician";
+
+      const extractionId = doc.filePath && doc.filePath.startsWith('/extractions/')
+        ? doc.filePath.replace('/extractions/', '').trim()
+        : String(doc.id);
       const refId = sr.reference_id || `HMS-DOC-${doc.id}`;
+      const rxRefId = `HMS-RX-${extractionId}`;
+
+      // Check if this document already has a verified timeline event in the DB
+      const hasVerifiedEvent =
+        verifiedRefIds.has(rxRefId.toLowerCase()) ||
+        verifiedRefIds.has(refId.toLowerCase()) ||
+        timelineEvents.some(
+          (ev) =>
+            (ev.reference_id === rxRefId || ev.reference_id === refId) &&
+            (ev.verification_status === "Prescription Verified" || ev.verification_status === "Hospital Verified")
+        );
+
+      if (hasVerifiedEvent && doc.status !== 'CONFIRMED') {
+        doc.status = 'CONFIRMED';
+      }
+
+      const isConfirmed = doc.status === 'CONFIRMED';
 
       let category = "Consultation";
       const nameLower = (doc.originalName || "").toLowerCase();
@@ -295,9 +355,10 @@ export async function GET(request: Request) {
         category = "Cardiovascular";
       }
 
-      const extractionId = doc.filePath && doc.filePath.startsWith('/extractions/')
-        ? doc.filePath.replace('/extractions/', '')
-        : doc.id;
+      // If patient_timeline_events already contains an event representing this document, skip adding duplicate
+      if (hasVerifiedEvent) {
+        return;
+      }
 
       docTimelineEvents.push({
         id: `doc-${doc.id}`,
@@ -354,46 +415,15 @@ export async function GET(request: Request) {
       }
     });
 
-    let timelineEvents: any[] = [];
-    let recordedMedicines: any[] = [];
-    try {
-      timelineEvents = await query(
-        `SELECT id, patient_id, user_id, event_date, category, title, description,
-                source, reliability, verification_status, facility, doctor, reference_id,
-                is_conflicting, conflict_details, created_at
-         FROM patient_timeline_events
-         WHERE patient_id = ANY($1::text[]) OR user_id = $2
-         ORDER BY event_date DESC, id DESC;`,
-        [patientIds, user.id]
-      );
-    } catch (tlErr) {
-      console.warn("Could not query patient_timeline_events:", tlErr);
-    }
-
-    try {
-      recordedMedicines = await query(
-        `SELECT id, patient_id, user_id, name, normalized_name, strength, status, indication,
-                frequency, route, start_date, expected_end_date, actual_end_date,
-                COALESCE(actual_end_date, expected_end_date) AS end_date,
-                duration_raw, duration_days, doctor, reference_id,
-                reconciliation_category, reconciliation_notes,
-                is_conflicting, conflict_details, source, reliability, verification_status, created_at
-         FROM patient_medications
-         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
-         ORDER BY CASE WHEN status = 'ACTIVE' THEN 0 ELSE 1 END, start_date DESC NULLS LAST, id DESC;`,
-        [patientIds, user.id]
-      );
-    } catch (medErr) {
-      console.warn("Could not query patient_medications:", medErr);
-    }
-
     // Merge & deduplicate timeline events
     const seenTl = new Set<string>();
     const unifiedTimeline: any[] = [];
     [...timelineEvents, ...docTimelineEvents].forEach((item) => {
-      const key = `${(item.title || '').trim().toLowerCase()}_${item.event_date ? item.event_date.toString().slice(0, 10) : ''}`;
-      if (!seenTl.has(key)) {
-        seenTl.add(key);
+      const titleDateKey = `${(item.title || '').trim().toLowerCase()}_${item.event_date ? item.event_date.toString().slice(0, 10) : ''}`;
+      const refKey = item.reference_id ? `ref_${String(item.reference_id).trim().toLowerCase()}` : '';
+      if (!seenTl.has(titleDateKey) && (!refKey || !seenTl.has(refKey))) {
+        seenTl.add(titleDateKey);
+        if (refKey) seenTl.add(refKey);
         unifiedTimeline.push(item);
       }
     });
@@ -419,7 +449,7 @@ export async function GET(request: Request) {
     const calculatedActiveMeds = unifiedMedicines.filter((m) => m.status === 'ACTIVE').length;
     const totalRecords = documents.length;
     const hospitalVerified = documents.filter((d) => d.status === 'CONFIRMED').length;
-    const pendingDocuments = documents.filter((d) => d.status !== 'CONFIRMED');
+    const pendingDocuments = documents.filter((d) => d.status !== 'CONFIRMED' && d.status !== 'DISCARDED');
 
     const historyCoverage = hospitalVerified > 0 ? `${Math.min(100, Math.round((hospitalVerified / 10) * 100))}%` : "0%";
 
@@ -542,7 +572,7 @@ export async function GET(request: Request) {
           imageUrl,
         };
       }),
-    });
+    }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error: any) {
     console.error('Dashboard User API Error:', error);
     return NextResponse.json(

@@ -13,11 +13,27 @@ export async function POST(
   const numericId = Number(cleanId);
   const validNum = !isNaN(numericId) && numericId > 0 ? numericId : -1;
 
+  let realExtractionId = cleanId;
+  try {
+    const docs = await query(
+      `SELECT id, "filePath" FROM "Document" WHERE id = $1 OR "filePath" LIKE $2 OR "filePath" = $3 LIMIT 1;`,
+      [validNum, `%/extractions/${cleanId}%`, `/extractions/${cleanId}`]
+    );
+    if (docs.length > 0 && docs[0].filePath && docs[0].filePath.startsWith("/extractions/")) {
+      realExtractionId = docs[0].filePath.replace("/extractions/", "").trim();
+    }
+  } catch (_) {}
+
   // 1. Tell Python OCR engine to delete the draft extraction (best-effort)
   try {
-    await pythonBackendFetch(`discard/${encodeURIComponent(cleanId)}`, {
+    await pythonBackendFetch(`discard/${encodeURIComponent(realExtractionId)}`, {
       method: "POST",
     });
+    if (realExtractionId !== cleanId) {
+      await pythonBackendFetch(`discard/${encodeURIComponent(cleanId)}`, {
+        method: "POST",
+      });
+    }
   } catch (pyErr) {
     console.warn("Python backend discard notice:", pyErr);
   }

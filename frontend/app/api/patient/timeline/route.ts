@@ -38,16 +38,61 @@ export async function GET(req: NextRequest) {
       [payload.userId, patientIds]
     );
 
-    const docTimelineEvents = documents.map((doc) => {
+    // 1. Query patient's custom/verified timeline events first
+    let customEvents: any[] = [];
+    try {
+      customEvents = await query(
+        `SELECT id, patient_id, user_id, event_date, category, title, description,
+                source, reliability, verification_status, facility, doctor, reference_id,
+                is_conflicting, conflict_details, created_at
+         FROM patient_timeline_events
+         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
+         ORDER BY event_date DESC, id DESC;`,
+        [patientIds, payload.userId]
+      );
+    } catch (e) {
+      console.warn("Could not query patient_timeline_events:", e);
+    }
+
+    const verifiedRefIds = new Set<string>();
+    customEvents.forEach((ev) => {
+      if (ev.reference_id) verifiedRefIds.add(String(ev.reference_id).trim().toLowerCase());
+    });
+
+    // 2. Track timeline events directly from documents
+    const docTimelineEvents: any[] = [];
+    documents.forEach((doc) => {
       const sr = doc.structuredResult || {};
       const docDate = sr.date_iso || (doc.uploadedAt ? new Date(doc.uploadedAt).toISOString().split('T')[0] : '2026-09-10');
-      const isConfirmed = doc.status === 'CONFIRMED';
       const facility = sr.hospital || "City Care Medical Centre";
       const doctor = typeof sr.doctor === 'string' ? sr.doctor : sr.doctor?.name || "Consulting Physician";
-      const refId = sr.reference_id || `HMS-DOC-${doc.id}`;
+
       const extractionId = doc.filePath && doc.filePath.startsWith('/extractions/')
-        ? doc.filePath.replace('/extractions/', '')
-        : doc.id;
+        ? doc.filePath.replace('/extractions/', '').trim()
+        : String(doc.id);
+      const refId = sr.reference_id || `HMS-DOC-${doc.id}`;
+      const rxRefId = `HMS-RX-${extractionId}`;
+
+      // Check if this document already has a verified timeline event in the DB
+      const hasVerifiedEvent =
+        verifiedRefIds.has(rxRefId.toLowerCase()) ||
+        verifiedRefIds.has(refId.toLowerCase()) ||
+        customEvents.some(
+          (ev) =>
+            (ev.reference_id === rxRefId || ev.reference_id === refId) &&
+            (ev.verification_status === "Prescription Verified" || ev.verification_status === "Hospital Verified")
+        );
+
+      if (hasVerifiedEvent && doc.status !== 'CONFIRMED') {
+        doc.status = 'CONFIRMED';
+      }
+
+      const isConfirmed = doc.status === 'CONFIRMED';
+
+      // If patient_timeline_events already contains an event representing this document, skip adding duplicate
+      if (hasVerifiedEvent) {
+        return;
+      }
 
       let category = "Consultation";
       const nameLower = (doc.originalName || "").toLowerCase();
@@ -63,7 +108,7 @@ export async function GET(req: NextRequest) {
         category = "Cardiovascular";
       }
 
-      return {
+      docTimelineEvents.push({
         id: `doc-${doc.id}`,
         document_id: doc.id,
         extraction_id: extractionId,
@@ -83,31 +128,17 @@ export async function GET(req: NextRequest) {
         conflict_details: null,
         created_at: doc.uploadedAt,
         status: doc.status,
-      };
+      });
     });
-
-    // 2. Query patient's custom/added timeline events
-    let customEvents: any[] = [];
-    try {
-      customEvents = await query(
-        `SELECT id, patient_id, user_id, event_date, category, title, description,
-                source, reliability, verification_status, facility, doctor, reference_id,
-                is_conflicting, conflict_details, created_at
-         FROM patient_timeline_events
-         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
-         ORDER BY event_date DESC, id DESC;`,
-        [patientIds, payload.userId]
-      );
-    } catch (e) {
-      console.warn("Could not query patient_timeline_events:", e);
-    }
 
     const seenTl = new Set<string>();
     const unifiedTimeline: any[] = [];
     [...customEvents, ...docTimelineEvents].forEach((item) => {
-      const key = `${(item.title || '').trim().toLowerCase()}_${item.event_date ? item.event_date.toString().slice(0, 10) : ''}`;
-      if (!seenTl.has(key)) {
-        seenTl.add(key);
+      const titleDateKey = `${(item.title || '').trim().toLowerCase()}_${item.event_date ? item.event_date.toString().slice(0, 10) : ''}`;
+      const refKey = item.reference_id ? `ref_${String(item.reference_id).trim().toLowerCase()}` : '';
+      if (!seenTl.has(titleDateKey) && (!refKey || !seenTl.has(refKey))) {
+        seenTl.add(titleDateKey);
+        if (refKey) seenTl.add(refKey);
         unifiedTimeline.push(item);
       }
     });

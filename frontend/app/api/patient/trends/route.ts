@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { verifyToken, generate9DigitPatientId } from "@/lib/auth";
+import { verifyToken } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { requirePatientSession } from "@/lib/serverAuth";
 import {
@@ -67,8 +67,22 @@ function isValidIsoDate(str: any): boolean {
   return !isNaN(d.getTime());
 }
 
+/**
+ * Safely parse structuredResult - it can come back from Postgres as a JSON string OR as
+ * an already-parsed object depending on the column type (jsonb vs text/varchar).
+ */
+function parseSR(rawSR: any): any {
+  if (!rawSR) return {};
+  if (typeof rawSR === "string") {
+    try { return JSON.parse(rawSR); } catch { return {}; }
+  }
+  return rawSR;
+}
+
 function extractClinicalDate(doc: any): string | null {
-  const sr = doc.structuredResult || {};
+  // BUG FIX: structuredResult can be a JSON string (text column) or an object (jsonb column).
+  // Always parse it to ensure property access works correctly.
+  const sr = parseSR(doc.structuredResult);
   if (isValidIsoDate(sr.date_iso)) return sr.date_iso.trim().slice(0, 10);
   if (isValidIsoDate(sr.rx_date)) return sr.rx_date.trim().slice(0, 10);
   if (isValidIsoDate(sr.date)) return sr.date.trim().slice(0, 10);
@@ -135,17 +149,24 @@ function computeCacheFingerprint(
  */
 async function verifyPrescriptionEligibility(user: any, patientIds: string[]) {
   // 1. Fetch user documents from Document table
+  // BUG FIX: Include ALL patientIds (patientId, legacyPatientId) plus userId in the WHERE clause
+  // Previously only userId and patientId were checked, missing legacyPatientId matches.
   const documents = await query(
     `SELECT d.id, d."originalName", d."storedFilename", d."documentType", d.status, d."uploadedAt", d."filePath",
             a.summary, a."structuredResult"
      FROM "Document" d
      LEFT JOIN "Analysis" a ON d.id = a."documentId"
-     WHERE (d."userId" = $1 OR d."patientId" = $2)
+     WHERE (d."userId" = $1 OR d."patientId" = ANY($2::text[]))
      ORDER BY d.id ASC;`,
-    [user.id, user.patientId]
+    [user.id, patientIds]
   );
 
+  console.log(`[Trends/Eligibility] Found ${documents.length} documents for authenticated patient`);
+  const confirmedDocs = documents.filter((d: any) => d.status === "CONFIRMED");
+  console.log(`[Trends/Eligibility] ${confirmedDocs.length} CONFIRMED documents out of ${documents.length} total`);
+
   // 2. Fetch confirmed prescriptions from confirmed_prescriptions table
+  // BUG FIX: Also search by extraction_id joining raw_ocr for broader patient ID coverage
   let confirmedPrescriptionsRows: any[] = [];
   try {
     confirmedPrescriptionsRows = await query(
@@ -155,6 +176,27 @@ async function verifyPrescriptionEligibility(user: any, patientIds: string[]) {
        ORDER BY cp.id ASC;`,
       [patientIds]
     );
+
+    // Include extraction-linked rows even when other prescriptions already matched directly.
+    try {
+      const extraConfirmed = await query(
+        `SELECT cp.id, cp.extraction_id, cp.patient_id, cp.rx_date, cp.hospital, cp.doctor, cp.doctor_reg_no, cp.data_json, cp.confirmed_at
+         FROM confirmed_prescriptions cp
+         JOIN extractions ex ON ex.id = cp.extraction_id
+         JOIN raw_ocr ro ON ro.id = ex.raw_ocr_id
+         WHERE ro.patient_id = ANY($1::text[])
+         ORDER BY cp.id ASC;`,
+        [patientIds]
+      );
+      const knownPrescriptionIds = new Set(confirmedPrescriptionsRows.map((row) => String(row.id)));
+      confirmedPrescriptionsRows.push(
+        ...extraConfirmed.filter((row) => !knownPrescriptionIds.has(String(row.id)))
+      );
+    } catch (joinErr) {
+      console.warn("[Trends] Extraction-linked prescription lookup failed:", joinErr);
+    }
+
+    console.log(`[Trends/Eligibility] Found ${confirmedPrescriptionsRows.length} confirmed_prescriptions rows`);
   } catch (err) {
     console.warn("[Trends] Error querying confirmed_prescriptions:", err);
   }
@@ -162,13 +204,14 @@ async function verifyPrescriptionEligibility(user: any, patientIds: string[]) {
   // Build mapping from extraction_id to Document row
   const extractionToDocMap = new Map<number, any>();
   documents.forEach((d) => {
+    const structuredResult = parseSR(d.structuredResult);
     let extId: number | null = null;
     if (d.filePath) {
       const m = d.filePath.match(/\/extractions\/(\d+)/);
       if (m) extId = parseInt(m[1], 10);
     }
-    if (!extId && d.structuredResult?.reference_id) {
-      const m = String(d.structuredResult.reference_id).match(/(\d+)/);
+    if (!extId && structuredResult.reference_id) {
+      const m = String(structuredResult.reference_id).match(/(\d+)/);
       if (m) extId = parseInt(m[1], 10);
     }
     if (extId) extractionToDocMap.set(extId, d);
@@ -217,9 +260,13 @@ async function verifyPrescriptionEligibility(user: any, patientIds: string[]) {
   for (const d of documents) {
     if (d.status !== "CONFIRMED") continue; // Exclude unconfirmed, discarded, not confirmed
     const rxDate = extractClinicalDate(d);
-    if (!rxDate || !isValidIsoDate(rxDate)) continue; // Exclude invalid dates
+    if (!rxDate || !isValidIsoDate(rxDate)) {
+      console.log(`[Trends/Eligibility] Skipping confirmed document without a valid clinical date (structuredResult type=${typeof d.structuredResult})`);
+      continue;
+    }
 
-    const sr = d.structuredResult || {};
+    // BUG FIX: Always parse structuredResult to handle both string and object forms
+    const sr = parseSR(d.structuredResult);
     let extId: number | null = null;
     if (d.filePath) {
       const m = d.filePath.match(/\/extractions\/(\d+)/);
@@ -255,6 +302,52 @@ async function verifyPrescriptionEligibility(user: any, patientIds: string[]) {
       if (!existing.documentName) existing.documentName = d.originalName;
       if (!existing.imageUrl) existing.imageUrl = sr.image_url || d.storedFilename;
     }
+  }
+
+  // The patient timeline is also written by the confirmation route. Some older uploads
+  // have a verified timeline event but no matching confirmed_prescriptions mirror or
+  // CONFIRMED Document row, so use those explicitly verified events as a source of truth.
+  try {
+    const verifiedTimelineRows = await query(
+      `SELECT id, event_date, facility, doctor, reference_id
+       FROM patient_timeline_events
+       WHERE patient_id = ANY($1::text[])
+         AND verification_status = 'Prescription Verified'
+         AND reference_id LIKE 'HMS-RX-%'
+       ORDER BY event_date ASC, id ASC;`,
+      [patientIds]
+    );
+
+    for (const event of verifiedTimelineRows) {
+      const rxDate = typeof event.event_date === "string"
+        ? event.event_date.slice(0, 10)
+        : event.event_date instanceof Date
+          ? event.event_date.toISOString().slice(0, 10)
+          : "";
+      if (!isValidIsoDate(rxDate)) continue;
+
+      const referenceMatch = String(event.reference_id || "").match(/^HMS-RX-(\d+)$/i);
+      const extractionId = referenceMatch ? Number(referenceMatch[1]) : null;
+      const dedupKey = extractionId
+        ? `ext_${extractionId}`
+        : `date_${rxDate}_${normalizeStr(event.facility)}_${normalizeStr(event.doctor)}`;
+      if (prescriptMap.has(dedupKey)) continue;
+
+      const linkedDoc = extractionId ? extractionToDocMap.get(extractionId) : null;
+      prescriptMap.set(dedupKey, {
+        id: event.id,
+        documentId: linkedDoc?.id || null,
+        extractionId,
+        date: rxDate,
+        hospital: event.facility || null,
+        doctor: event.doctor || null,
+        documentName: linkedDoc?.originalName || `Prescription - ${rxDate}`,
+        filePath: linkedDoc?.filePath || (extractionId ? `/extractions/${extractionId}` : null),
+        imageUrl: linkedDoc?.storedFilename || null,
+      });
+    }
+  } catch (timelineErr) {
+    console.warn("[Trends] Verified prescription timeline lookup failed:", timelineErr);
   }
 
   const eligiblePrescriptions = Array.from(prescriptMap.values()).sort((a, b) => {
@@ -515,7 +608,11 @@ export async function GET(req: NextRequest) {
 
     let patientCode = user.patientId;
     if (!patientCode) {
-      patientCode = generate9DigitPatientId();
+      // BUG FIX: Use generatePatientId() (P- prefix format) consistent with login route.
+      // Previously used generate9DigitPatientId() which produces a format without "P-" prefix,
+      // causing mismatch with patientIds stored by OCR/confirm routes using the login-generated ID.
+      const { generatePatientId } = await import("@/lib/auth");
+      patientCode = generatePatientId();
       await query(`UPDATE "User" SET "patientId" = $1 WHERE id = $2;`, [patientCode, user.id]);
       user.patientId = patientCode;
     }
@@ -523,6 +620,8 @@ export async function GET(req: NextRequest) {
     const patientIds: string[] = [user.patientId, user.legacyPatientId, String(user.id)].filter(
       (id): id is string => Boolean(id)
     );
+
+    console.log("[Trends] Loading records for authenticated patient");
 
     // 3. Verify prescription eligibility (Backend Enforcement: >= 5 confirmed, non-duplicate clinical dates)
     const { eligibility, documents } = await verifyPrescriptionEligibility(user, patientIds);
@@ -546,9 +645,12 @@ export async function GET(req: NextRequest) {
       rawObs.map((o) => `${(o.obs_date || "").slice(0, 10)}_${o.kind}`)
     );
 
+    console.log(`[Trends] Found ${rawObs.length} raw observations from DB`);
+
     documents.forEach((doc) => {
       if (doc.status !== "CONFIRMED") return;
-      const sr = doc.structuredResult || {};
+      // BUG FIX: parseSR ensures structuredResult is always an object, not a string
+      const sr = parseSR(doc.structuredResult);
       const dateStr = extractClinicalDate(doc);
       if (!dateStr) return;
       const vitals = sr.vitals || [];
