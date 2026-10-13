@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pythonBackendFetch } from "@/lib/api";
 import { requirePatientSession } from "@/lib/serverAuth";
+import type { ExtractionPayload } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 360; // 6 minutes for CPU vision transformer + LLM structuring
@@ -8,6 +9,16 @@ export const maxDuration = 360; // 6 minutes for CPU vision transformer + LLM st
 const MAX_UPLOAD_MB = 10;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/jpg", "image/pjpeg"]);
+
+type UploadExtractionPayload = ExtractionPayload & {
+  record: ExtractionPayload["record"] & { image_url?: string | null };
+};
+
+interface ExistingDocument {
+  id: number;
+  storedFilename: string | null;
+  status: string;
+}
 
 export async function GET() {
   return NextResponse.json({
@@ -72,7 +83,7 @@ export async function POST(req: NextRequest) {
     backendFormData.append("patient_id", effectivePatientId);
     backendFormData.append("patient_name", verifiedPatientName);
 
-    const result = await pythonBackendFetch(
+    const result = await pythonBackendFetch<UploadExtractionPayload>(
       "ocr",
       {
         method: "POST",
@@ -96,10 +107,10 @@ export async function POST(req: NextRequest) {
 
     console.log(`[${new Date().toISOString()}] [API/OCR] Pipeline completed successfully in ${elapsedMs}ms`);
 
-    const extractionData = result.data as any;
+    const extractionData = result.data;
     const extractionId = extractionData?.extraction_id;
-    const rec = extractionData?.record || {};
-    if (!extractionId) {
+    const rec = extractionData?.record;
+    if (!extractionData || !extractionId || !rec) {
       return NextResponse.json(
         { error: "The OCR service returned no extraction ID. Retry this image to recover the saved processing attempt." },
         { status: 502 }
@@ -108,15 +119,15 @@ export async function POST(req: NextRequest) {
 
     const { query } = await import("@/lib/db");
     const extractionPath = `/extractions/${extractionId}`;
-    let existingDoc: any = null;
+    let existingDoc: ExistingDocument | null = null;
     try {
       const existingRows = await query(
         `SELECT id, "storedFilename", status
          FROM "Document"
-         WHERE "userId" = $1 AND "patientId" = $2 AND "filePath" = $3
+         WHERE "userId" = $1 AND "filePath" = $2
          ORDER BY id DESC
          LIMIT 1;`,
-        [userId, effectivePatientId, extractionPath]
+        [userId, extractionPath]
       );
       existingDoc = existingRows[0] || null;
     } catch (lookupErr) {
@@ -160,12 +171,14 @@ export async function POST(req: NextRequest) {
     // cannot create duplicate timeline documents.
     try {
       rec.image_url = publicImageUrl;
+      const isConfirmed = extractionData.status === "CONFIRMED" || existingDoc?.status === "CONFIRMED";
       const hospitalName = rec.hospital || file.name.replace(/\.[^/.]+$/, "");
       const dateIso = rec.date_iso || new Date().toISOString().slice(0, 10);
       const docName = `${hospitalName} - ${dateIso}`;
       const medCount = (rec.medicines || []).length;
       const doctorStr = typeof rec.doctor === "string" ? rec.doctor : rec.doctor?.name || "Dr. Unverified";
-      const docSummary = `${hospitalName} (${doctorStr}). Extracted ${medCount} therapies. Status: NOT CONFIRMED (Awaiting Clinician Review).`;
+      const reviewStatus = isConfirmed ? "CONFIRMED" : "NOT CONFIRMED (Awaiting Clinician Review)";
+      const docSummary = `${hospitalName} (${doctorStr}). Extracted ${medCount} therapies. Status: ${reviewStatus}.`;
 
       let documentId: number | null = existingDoc?.id ?? null;
       if (documentId) {
@@ -173,16 +186,16 @@ export async function POST(req: NextRequest) {
           `UPDATE "Document"
            SET "originalName" = $1,
                "storedFilename" = CASE WHEN $2 = '/sample_prescription.png' THEN "storedFilename" ELSE $2 END,
-               status = CASE WHEN status = 'CONFIRMED' THEN status ELSE 'NOT CONFIRMED' END
-           WHERE id = $3 AND "userId" = $4 AND "patientId" = $5;`,
-          [docName, publicImageUrl, documentId, userId, effectivePatientId]
+               status = CASE WHEN status = 'CONFIRMED' OR $5 THEN 'CONFIRMED' ELSE 'NOT CONFIRMED' END
+           WHERE id = $3 AND "userId" = $4;`,
+          [docName, publicImageUrl, documentId, userId, isConfirmed]
         );
       } else {
         const docRows = await query(
           `INSERT INTO "Document" ("userId", "patientId", "originalName", "storedFilename", "documentType", "mimeType", "filePath", status, "uploadedAt")
-           VALUES ($1, $2, $3, $4, 'PRESCRIPTION', $5, $6, 'NOT CONFIRMED', $7)
+           VALUES ($1, $2, $3, $4, 'PRESCRIPTION', $5, $6, $8, $7)
            RETURNING id;`,
-          [userId, effectivePatientId, docName, publicImageUrl, file.type, extractionPath, new Date().toISOString()]
+          [userId, effectivePatientId, docName, publicImageUrl, file.type, extractionPath, new Date().toISOString(), isConfirmed ? "CONFIRMED" : "NOT CONFIRMED"]
         );
         documentId = docRows[0]?.id ?? null;
       }
@@ -209,14 +222,13 @@ export async function POST(req: NextRequest) {
       console.warn("Could not save initial NOT CONFIRMED document to DB:", dbErr);
     }
 
-    if (result.data) {
-      (result.data as any).image_url = publicImageUrl;
-    }
-    return NextResponse.json(result.data);
-  } catch (err: any) {
+    extractionData.record.image_url = publicImageUrl;
+    return NextResponse.json(extractionData);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to process prescription upload";
     console.error(`[${new Date().toISOString()}] [API/OCR] Unexpected exception in route:`, err);
     return NextResponse.json(
-      { error: err.message || "Failed to process prescription upload" },
+      { error: message },
       { status: 500 }
     );
   }

@@ -48,7 +48,7 @@ export default function UploadPage() {
   useEffect(() => {
     const loadCurrentUser = async () => {
       try {
-        let token = localStorage.getItem("auth_token");
+        const token = localStorage.getItem("auth_token");
         const res = await fetch("/api/user/dashboard", {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
@@ -163,12 +163,13 @@ export default function UploadPage() {
       clearInterval(timerInterval);
       setStep("success");
       router.push(`/patient/documents/${result.extraction_id}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearInterval(timerInterval);
       setStep("error");
-      setErrorMessage(err.message || "Failed to process prescription image.");
-      if (err.rawOcrId) {
-        setRawOcrId(err.rawOcrId);
+      const uploadError = err instanceof Error ? err as Error & { rawOcrId?: number } : null;
+      setErrorMessage(uploadError?.message || "Failed to process prescription image.");
+      if (uploadError?.rawOcrId) {
+        setRawOcrId(uploadError.rawOcrId);
       }
     }
   };

@@ -1196,12 +1196,15 @@ def process_image(data: bytes, filename: str, patient_id: str, expected_name: Op
             ).mappings().first()
 
         if existing and existing["status"] != "DISCARDED":
-            analysis = json.loads(existing["analysis_json"] or "{}")
-            log_stage("DUPLICATE_RECOVERED", f"Returning existing extraction #{existing['id']} for raw OCR #{raw_id}", time.time() - t_pipeline_start)
-            return _payload(
-                existing["id"], raw_id, existing["status"], analysis,
-                existing["llm_model"], duplicate=True,
-            )
+            raw_analysis = existing["analysis_json"] or "{}"
+            analysis = json.loads(raw_analysis) if isinstance(raw_analysis, str) else raw_analysis
+            if isinstance(analysis, dict) and isinstance(analysis.get("record"), dict):
+                log_stage("DUPLICATE_RECOVERED", f"Returning existing extraction #{existing['id']} for raw OCR #{raw_id}", time.time() - t_pipeline_start)
+                return _payload(
+                    existing["id"], raw_id, existing["status"], analysis,
+                    existing["llm_model"], duplicate=True,
+                )
+            log_stage("DUPLICATE_RECOVERY", f"Existing extraction for raw OCR #{raw_id} has no usable structured record; retrying", time.time() - t_pipeline_start)
 
         # No reviewable draft exists yet (or the prior draft was discarded). Reuse its OCR
         # lines, but provide this uploaded image to Gemini so image-grounded transcription

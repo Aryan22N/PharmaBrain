@@ -147,6 +147,8 @@ curl -X POST http://localhost:8000/ocr \
 | 500 | OCR inference failed |
 | 502 | All Gemini models failed |
 
+**Retry behavior:** If the same image is uploaded again for the same patient, the service returns its existing non-discarded extraction when one exists. If OCR was saved but no extraction was created because structuring failed, it reuses the saved OCR lines and retries structuring with the newly uploaded image. This makes retries safe after network interruptions without creating another extraction for an already completed upload.
+
 ---
 
 ### `POST /api/ocr` — Direct OCR (no auth, no LLM)
@@ -375,7 +377,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 
 | Route | Method | Proxies to Python | Notes |
 |---|---|---|---|
-| `/api/ocr` | POST | `POST /ocr` | Uploads image to Supabase Storage Bucket (`OCR_Images/uploads/`), checks SHA256 duplicate image hash, creates `Document` & `Analysis` records, returns `image_url` |
+| `/api/ocr` | POST | `POST /ocr` | Uploads the image, resumes an identical prior attempt or returns its existing extraction, idempotently persists the `Document` & `Analysis` by extraction ID, and returns `image_url` |
 | `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, marks `source = 'Prescription Scan'`, `verification_status = 'Prescription Verified'`, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, mirrors vitals to `observations` table |
 | `/api/discard/[id]` | POST | `POST /discard/{id}` | Purges draft from PostgreSQL (`Document`, `Analysis`, and unconfirmed `patient_timeline_events`), and notifies Python backend |
 | `/api/extractions/[id]` | GET | `GET /extractions/{id}` | Fetches extraction draft from Python backend, with resilient fallback to PostgreSQL `Document` & `Analysis` tables if Python memory cache has expired |

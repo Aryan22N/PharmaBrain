@@ -164,16 +164,17 @@ Use Next.js 16 App Router. Frontend API routes use `pg.Pool` directly via `front
 **Status:** Accepted
 
 **Context:**  
-If a user uploads the same prescription image twice, it should not re-run OCR and LLM, saving API cost.
+If a user uploads the same prescription image twice, it should not create duplicate OCR or extraction records. A retry after failed structuring must remain recoverable.
 
 **Decision:**  
-Compute SHA-256 of the raw image bytes. Before processing, check if `raw_ocr` has a row with the same `image_sha256` and `patient_id` with a non-DISCARDED extraction. If found, return the existing extraction.
+Compute SHA-256 of the raw image bytes and scope the lookup to the patient. If a non-discarded extraction already exists for the matching raw OCR, return it. If only the raw OCR exists (or its prior extraction was discarded), reuse the saved OCR lines and retry structuring with the re-uploaded image.
 
 **Evidence:** Confirmed — `process_image()` in `model/final_prescription_ocr_service_windows.py` → `sha = hashlib.sha256(data).hexdigest()`.
 
 **Consequences:**
 - Deduplication is per-patient (same image for a different patient is processed fresh).
 - A discarded extraction does not prevent re-processing the same image.
+- Failed Gemini structuring can recover from the saved raw OCR without creating another raw OCR row.
 
 ---
 
