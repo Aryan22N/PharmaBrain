@@ -376,7 +376,8 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | Route | Method | Proxies to Python | Notes |
 |---|---|---|---|
 | `/api/ocr` | POST | `POST /ocr` | Uploads image to Supabase Storage Bucket (`OCR_Images/uploads/`), checks SHA256 duplicate image hash, creates `Document` & `Analysis` records, returns `image_url` |
-| `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, marks `source = 'Prescription Scan'`, `verification_status = 'Prescription Verified'`, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, mirrors vitals to `observations` table |
+| `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, treats an already-confirmed extraction as an idempotent mirror-repair request, upserts one verified timeline event using a stable prescription reference, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, and mirrors vitals to `observations` |
+| `/api/patient/documents/[id]/confirm` | POST | — | Confirms a patient-owned document, upserts its verified timeline mirror by extraction/document identity, and returns an error if the timeline event could not be persisted |
 | `/api/discard/[id]` | POST | `POST /discard/{id}` | Purges draft from PostgreSQL (`Document`, `Analysis`, and unconfirmed `patient_timeline_events`), and notifies Python backend |
 | `/api/extractions/[id]` | GET | `GET /extractions/{id}` | Fetches extraction draft from Python backend, with resilient fallback to PostgreSQL `Document` & `Analysis` tables if Python memory cache has expired |
 | `/api/extractions` | GET | `GET /extractions` | Lists recent extractions |
@@ -385,7 +386,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | `/api/patients/[id]/prescriptions` | GET | `GET /patients/{id}/prescriptions` | Fetches confirmed prescriptions for patient |
 | `/api/patients/[id]/observations` | GET | `GET /patients/{id}/observations` | Fetches vital observations time-series |
 | `/api/patient/trends` | GET | `POST /patients/{patient_id}/trends_summary` | Evaluates longitudinal statistical trends (AHA/ACC BP, ADA glucose), deltas, and Gemini AI patient narrative |
-| `/api/patient/timeline` | GET | — | Returns unified chronological timeline with draft indicators (`Prescription Scan (Draft)`, `Awaiting Review`, `Pending Review`) for unconfirmed records and verified badges for confirmed records |
+| `/api/patient/timeline` | GET | — | Returns a no-store unified timeline, merging document and event rows by prescription/extraction identity so one prescription renders once while distinct prescriptions on the same date remain distinct; drafts retain review indicators and confirmed records retain verified badges |
 | `/api/patient/medicines` | GET, POST | — | Longitudinal medication lifecycle management. GET synchronizes and returns only medication records belonging to the authenticated patient’s canonical or legacy patient ID (and that patient’s user ID), with resolved high-res prescription scan URLs. POST creates a manual course for the authenticated patient. |
 | `/api/patient/medicines/[id]` | PATCH, PUT | — | PATCH transitions lifecycle status (`COMPLETED`, `ON_HOLD`, `DISCONTINUED`, `ACTIVE`) with mandatory clinical reason. PUT resolves review conflicts. Writes audit log. |
 | `/uploads/[...slug]` | GET | — | Dynamic high-res image serving route for prescription scans; checks `/public/uploads/` with transparent fallback to `/sample_prescription.png`. |
@@ -393,12 +394,14 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | `/api/auth` | POST | — | Login/register, returns JWT cookie |
 | `/api/user` | GET | — | Current user info from DB |
 | `/api/user/onboarding` | POST, GET | — | Saves & retrieves patient initial profile context (`patient_onboarding` table) |
-| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl` |
+| `/api/user/dashboard` | GET | — | Returns patient profile, no-store timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl` |
 | `/api/user/save-ocr` | POST | — | Direct helper to persist confirmed OCR payload into `Document` and `Analysis` tables |
 
 ---
 
 ### Medication Lifecycle Endpoints
+
+Before deploying the idempotent prescription-confirmation routes against an existing database, run [`scratch/migrations/003_idempotent_prescription_timeline.sql`](../../scratch/migrations/003_idempotent_prescription_timeline.sql). It normalizes legacy prescription event references, removes only duplicate system-generated verified prescription mirrors sharing the same user/reference, and creates the unique index required by the upsert. New database setup gets the index from `scratch/create_timeline_and_medicines_tables.sql`.
 
 #### `GET /api/patient/medicines`
 Aggregates medications for the authenticated patient, executes the generalized reconciliation engine, and returns partitioned courses:

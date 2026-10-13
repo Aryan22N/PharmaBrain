@@ -19,7 +19,10 @@ __pycache__/
 *.so
 
 # Scratch scripts and temporary files
-scratch/
+scratch/*
+!scratch/migrations/
+scratch/migrations/*
+!scratch/migrations/*.sql
 
 # Local SQLite databases & preprocessed images
 *.db

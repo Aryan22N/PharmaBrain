@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS patient_timeline_events (
 
 CREATE INDEX IF NOT EXISTS idx_timeline_patient_id ON patient_timeline_events(patient_id);
 CREATE INDEX IF NOT EXISTS idx_timeline_event_date ON patient_timeline_events(event_date);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patient_timeline_confirmed_rx_user_ref
+    ON patient_timeline_events(user_id, reference_id)
+    WHERE user_id IS NOT NULL
+      AND source = 'Prescription Scan'
+      AND verification_status = 'Prescription Verified'
+      AND reference_id LIKE 'RX-%';
 
 CREATE TABLE IF NOT EXISTS patient_medications (
     id SERIAL PRIMARY KEY,

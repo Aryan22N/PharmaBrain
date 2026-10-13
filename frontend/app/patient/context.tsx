@@ -49,7 +49,7 @@ export interface PatientDashboardContextType {
   timelineEvents: any[];
   recordedMedicines: any[];
   conflictingMedicines: any[];
-  refresh: () => Promise<void>;
+  refresh: () => Promise<boolean>;
 
   // Modals & detail states
   selectedSummaryRecord: any | null;
@@ -243,7 +243,7 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
   // OCR quick scan modal state
   const [ocrModalOpen, setOcrModalOpen] = useState(false);
 
-  const fetchDashboardData = useCallback(async () => {
+  const fetchDashboardData = useCallback(async (): Promise<boolean> => {
     try {
       setLoading(true);
       const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
@@ -251,10 +251,11 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
         if (typeof window !== "undefined") {
           window.location.href = "/auth/patient/login";
         }
-        return;
+        return false;
       }
 
       const res = await fetch("/api/user/dashboard", {
+        cache: "no-store",
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -264,14 +265,14 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
           localStorage.removeItem("user");
           window.location.href = "/auth/patient/login";
         }
-        return;
+        return false;
       }
 
       if (res.status === 403) {
         if (typeof window !== "undefined") {
           window.location.href = "/doctor/dashboard";
         }
-        return;
+        return false;
       }
 
       const data = await res.json();
@@ -289,8 +290,10 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
         if (data.recordedMedicines) setRecordedMedicines(data.recordedMedicines);
         if (data.conflictingMedicines) setConflictingMedicines(data.conflictingMedicines);
       }
+      return res.ok && Boolean(data.success);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
+      return false;
     } finally {
       setLoading(false);
     }

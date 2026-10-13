@@ -11,6 +11,7 @@ import {
   ConfirmResult,
 } from "@/lib/types";
 import { clientApi } from "@/lib/api";
+import { usePatientDashboard } from "@/app/patient/context";
 import { GateBadge } from "@/components/StatusBadge";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { MedicineEditor } from "@/components/MedicineEditor";
@@ -42,6 +43,7 @@ export default function PatientDocumentDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const { refresh } = usePatientDashboard();
 
   const [payload, setPayload] = useState<ExtractionPayload | null>(null);
   const [record, setRecord] = useState<PrescriptionRecord | null>(null);
@@ -144,6 +146,7 @@ export default function PatientDocumentDetailPage({
       setConfirmSuccess(result);
       setError(null);
       setPayload((prev) => (prev ? { ...prev, status: "CONFIRMED" } : null));
+      await refresh();
     } catch (err: any) {
       if (err.status === 409 && err.message?.includes("duplicate")) {
         setDuplicateWarning(err.message);
@@ -157,6 +160,7 @@ export default function PatientDocumentDetailPage({
           observations_saved: 0,
           observations_skipped: [],
         });
+        await refresh();
       } else {
         setError(err.message || "Failed to confirm prescription.");
       }

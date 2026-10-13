@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requirePatientSession } from "@/lib/serverAuth";
 import { getPatientIds } from "@/lib/patientScope";
+import {
+  getPrescriptionTimelineReference,
+  upsertConfirmedPrescriptionTimelineEvent,
+} from "@/lib/prescriptionTimeline";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +68,7 @@ export async function POST(
     }
 
     // 4. Promote medications & timeline event to active EHR if not already created
+    let timelineEventPersisted = false;
     try {
       const anRows = await query(
         `SELECT "structuredResult", summary FROM "Analysis" WHERE "documentId" = $1 LIMIT 1;`,
@@ -85,27 +90,45 @@ export async function POST(
           .filter(Boolean)
           .join(", ");
 
-        await query(
-          `INSERT INTO patient_timeline_events (
-            patient_id, user_id, event_date, category, title, description,
-            source, reliability, verification_status, facility, doctor, reference_id,
-            is_conflicting, conflict_details
-          ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Prescription Scan', 'High', 'Prescription Verified', $6, $7, $8, false, null);`,
-          [
-            effectivePatientId,
-            user.id,
-            eventDate,
-            `Prescription: ${medSummary || doc.originalName || "Verified Rx"}`,
-            anRows[0].summary || `Prescribed: ${medSummary}. Verified record.`,
-            hospitalStr,
-            doctorStr,
-            `HMS-DOC-${docId}`,
-          ]
-        );
+        const extractionId = doc.filePath?.startsWith("/extractions/")
+          ? doc.filePath.slice("/extractions/".length)
+          : null;
+        const prescriptionReference = getPrescriptionTimelineReference(extractionId, docId);
+        const priorMedicationReferences = [
+          prescriptionReference,
+          `HMS-DOC-${docId}`,
+          ...(extractionId && /^\d+$/.test(extractionId) ? [`HMS-RX-${extractionId}`] : []),
+        ];
+        await upsertConfirmedPrescriptionTimelineEvent({
+          patientId: effectivePatientId,
+          userId: user.id,
+          extractionId,
+          documentId: docId,
+          eventDate,
+          title: `Prescription: ${medSummary || doc.originalName || "Verified Rx"}`,
+          description: anRows[0].summary || `Prescribed: ${medSummary}. Verified record.`,
+          facility: hospitalStr,
+          doctor: doctorStr,
+        });
+        timelineEventPersisted = true;
 
         if (Array.isArray(sr.medicines)) {
           for (const med of sr.medicines) {
             if (!med.name) continue;
+            const normalizedStrength = String(med.strength || "").trim().toLowerCase();
+            const normalizedFrequency = String(med.frequency || "Once daily").trim().toLowerCase();
+            const existingMedication = await query(
+              `SELECT id FROM patient_medications
+               WHERE user_id = $1
+                 AND reference_id = ANY($2::text[])
+                 AND lower(name) = lower($3)
+                 AND lower(COALESCE(strength, '')) = $4
+                 AND lower(COALESCE(frequency, '')) = $5
+               LIMIT 1;`,
+              [user.id, priorMedicationReferences, med.name.trim(), normalizedStrength, normalizedFrequency]
+            );
+            if (existingMedication.length > 0) continue;
+
             await query(
               `INSERT INTO patient_medications (
                 patient_id, user_id, name, normalized_name, strength, status, indication,
@@ -123,7 +146,7 @@ export async function POST(
                 med.route || "Oral",
                 eventDate,
                 doctorStr,
-                `HMS-DOC-${docId}`,
+                prescriptionReference,
               ]
             );
           }
@@ -131,6 +154,13 @@ export async function POST(
       }
     } catch (promoteErr) {
       console.warn("Could not promote therapies to EHR tables:", promoteErr);
+    }
+
+    if (!timelineEventPersisted) {
+      return NextResponse.json(
+        { error: "Prescription confirmation needs to be retried because its timeline event could not be saved." },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({

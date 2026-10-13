@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { generate9DigitPatientId } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { requirePatientSession } from '@/lib/serverAuth';
+import { mergeTimelineEvents } from '@/lib/prescriptionTimeline';
 
 export const dynamic = 'force-dynamic';
 
@@ -387,17 +388,10 @@ export async function GET(request: Request) {
       console.warn("Could not query patient_medications:", medErr);
     }
 
-    // Merge & deduplicate timeline events
-    const seenTl = new Set<string>();
-    const unifiedTimeline: any[] = [];
-    [...timelineEvents, ...docTimelineEvents].forEach((item) => {
-      const key = `${(item.title || '').trim().toLowerCase()}_${item.event_date ? item.event_date.toString().slice(0, 10) : ''}`;
-      if (!seenTl.has(key)) {
-        seenTl.add(key);
-        unifiedTimeline.push(item);
-      }
-    });
-    unifiedTimeline.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+    // Merge document and persisted-event views by prescription identity. A
+    // title/date match is not sufficient because distinct prescriptions may
+    // share a date and similar titles.
+    const unifiedTimeline = mergeTimelineEvents(timelineEvents, docTimelineEvents);
 
     // Merge & deduplicate recorded medicines
     const medMap = new Map<string, any>();
@@ -542,7 +536,7 @@ export async function GET(request: Request) {
           imageUrl,
         };
       }),
-    });
+    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error: any) {
     console.error('Dashboard User API Error:', error);
     return NextResponse.json(

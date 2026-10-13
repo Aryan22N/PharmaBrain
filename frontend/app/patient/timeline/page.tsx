@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Clock,
   Plus,
@@ -34,6 +34,12 @@ export default function MedicalTimelinePage() {
     setSelectedSummaryRecord,
     setAddTimelineModalOpen,
   } = usePatientDashboard();
+
+  // Refresh the provider's server-backed snapshot when returning to the
+  // timeline; the patient layout keeps that provider mounted across routes.
+  useEffect(() => {
+    void Promise.resolve().then(() => refresh());
+  }, [refresh]);
 
   const [discardingId, setDiscardingId] = useState<string | number | null>(null);
 
@@ -88,9 +94,14 @@ export default function MedicalTimelinePage() {
   });
 
   const handleTimelineClick = (ev: any) => {
-    let docIdStr = ev.id ? String(ev.id).replace(/^doc-/, '') : '';
+    const docIdStr = ev.document_id != null
+      ? String(ev.document_id)
+      : ev.id ? String(ev.id).replace(/^doc-/, '') : '';
     let matchedDoc = documents.find(
-      (d) => String(d.id) === docIdStr || d.structuredResult?.reference_id === ev.reference_id
+      (d) =>
+        String(d.id) === docIdStr ||
+        (ev.extraction_id != null && String(d.filePath || "").endsWith(`/${ev.extraction_id}`)) ||
+        d.structuredResult?.reference_id === ev.reference_id
     );
 
     if (!matchedDoc) {

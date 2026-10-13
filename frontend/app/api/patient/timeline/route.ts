@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import { verifyToken } from "@/lib/auth";
 import { requirePatientSession } from "@/lib/serverAuth";
 import { getPatientIds, getPrimaryPatientId } from "@/lib/patientScope";
+import { mergeTimelineEvents } from "@/lib/prescriptionTimeline";
 
 export const dynamic = "force-dynamic";
 
@@ -102,16 +103,7 @@ export async function GET(req: NextRequest) {
       console.warn("Could not query patient_timeline_events:", e);
     }
 
-    const seenTl = new Set<string>();
-    const unifiedTimeline: any[] = [];
-    [...customEvents, ...docTimelineEvents].forEach((item) => {
-      const key = `${(item.title || '').trim().toLowerCase()}_${item.event_date ? item.event_date.toString().slice(0, 10) : ''}`;
-      if (!seenTl.has(key)) {
-        seenTl.add(key);
-        unifiedTimeline.push(item);
-      }
-    });
-    unifiedTimeline.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+    const unifiedTimeline = mergeTimelineEvents(customEvents, docTimelineEvents);
 
     return NextResponse.json({
       success: true,
@@ -119,7 +111,7 @@ export async function GET(req: NextRequest) {
       timelineEvents: unifiedTimeline,
       total: unifiedTimeline.length,
       conflictsCount: unifiedTimeline.filter(e => e.is_conflicting).length,
-    });
+    }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error: any) {
     console.error("Timeline API Error:", error);
     return NextResponse.json(

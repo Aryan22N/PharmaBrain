@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pythonBackendFetch } from "@/lib/api";
+import {
+  getPrescriptionTimelineReference,
+  upsertConfirmedPrescriptionTimelineEvent,
+} from "@/lib/prescriptionTimeline";
 
 export const dynamic = "force-dynamic";
 
@@ -21,18 +25,21 @@ export async function POST(
     );
 
     if (!result.ok) {
-      if (result.status === 409) {
+      if (result.status === 409 && !result.error?.toLowerCase().includes("already confirmed")) {
         return NextResponse.json(
           { error: result.error || "Confirmation failed" },
           { status: 409 }
         );
       }
-      console.warn(`[API/CONFIRM] Python backend returned ${result.status}: ${result.error}. Proceeding with direct PostgreSQL database confirmation.`);
+      if (result.status !== 409) {
+        console.warn(`[API/CONFIRM] Python backend returned ${result.status}: ${result.error}. Proceeding with direct PostgreSQL database confirmation.`);
+      }
     }
 
     const rec = body.record || {};
     let userId: number | null = null;
     let patientId: string | null = null;
+    let timelineEventPersisted = false;
 
     // Mirror confirmed prescription to Document and Analysis tables in Supabase DB for Patient Summary
     try {
@@ -83,9 +90,11 @@ export async function POST(
          WHERE d."filePath" = $1 ORDER BY d.id DESC LIMIT 1;`,
         [`/extractions/${id}`]
       );
+      let linkedDocumentId: string | number = id;
 
       if (existingDocs.length > 0) {
         const docId = existingDocs[0].id;
+        linkedDocumentId = docId;
         let prevResult = existingDocs[0].structuredResult || {};
         if (typeof prevResult === "string") {
           try { prevResult = JSON.parse(prevResult); } catch (_) { prevResult = {}; }
@@ -126,6 +135,7 @@ export async function POST(
         );
 
         if (docRows.length > 0) {
+          linkedDocumentId = docRows[0].id;
           await query(
             `INSERT INTO "Analysis" ("documentId", summary, "structuredResult", "isDemo", "createdAt")
              VALUES ($1, $2, $3, false, $4);`,
@@ -138,26 +148,26 @@ export async function POST(
       const eventDate = rec.date_iso || new Date().toISOString().slice(0, 10);
       const docNameStr = typeof rec.doctor === "string" ? rec.doctor : rec.doctor?.name || "Attending Physician";
       const hospNameStr = rec.hospital || "Medical Centre";
-      const refId = `HMS-RX-${id}`;
+      const refId = getPrescriptionTimelineReference(id, linkedDocumentId);
+      const priorPrescriptionReferences = [
+        refId,
+        `HMS-RX-${id}`,
+        `HMS-DOC-${linkedDocumentId}`,
+      ];
 
       try {
-        await query(
-          `INSERT INTO patient_timeline_events (
-            patient_id, user_id, event_date, category, title, description,
-            source, reliability, verification_status, facility, doctor, reference_id,
-            is_conflicting, conflict_details
-          ) VALUES ($1, $2, $3, 'Medication', $4, $5, 'Prescription Scan', 'High', 'Prescription Verified', $6, $7, $8, false, null);`,
-          [
-            patientId,
-            userId,
-            eventDate,
-            `Prescription: ${medSummary || "Clinical Rx"}`,
-            docSummary,
-            hospNameStr,
-            docNameStr,
-            refId,
-          ]
-        );
+        await upsertConfirmedPrescriptionTimelineEvent({
+          patientId: patientId || `P-${userId}`,
+          userId,
+          extractionId: id,
+          documentId: linkedDocumentId,
+          eventDate,
+          title: `Prescription: ${medSummary || "Clinical Rx"}`,
+          description: docSummary,
+          facility: hospNameStr,
+          doctor: docNameStr,
+        });
+        timelineEventPersisted = true;
       } catch (tlErr) {
         console.warn("Could not auto-add to timeline_events:", tlErr);
       }
@@ -220,7 +230,7 @@ export async function POST(
           // Check if already confirmed (idempotency check by reference_id & med name)
           const alreadyExists = existingCourses.some(
             (c: any) =>
-              c.referenceId === refId &&
+              priorPrescriptionReferences.includes(c.referenceId) &&
               (c.normalizedName === normName || normalizeMedicineName(c.name) === normName)
           );
           if (alreadyExists) continue;
@@ -359,7 +369,14 @@ export async function POST(
       console.warn("Could not update/mirror confirmed prescription to Document table:", dbErr);
     }
 
-    return NextResponse.json(result.data || {
+    if (!timelineEventPersisted) {
+      return NextResponse.json(
+        { error: "Prescription confirmation needs to be retried because its timeline event could not be saved." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(result.ok && result.data ? result.data : {
       ok: true,
       confirmed: true,
       prescription_id: Number(id),
