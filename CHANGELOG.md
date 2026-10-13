@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-13 — Made duplicate prescription uploads resume from saved OCR when structuring failed, return existing extractions idempotently, serialize structuring per OCR row, bound Gemini HTTP attempts, refreshed model candidates, and stopped printing the backend API token at startup.
 - 2026-10-13 — Fixed the prescription timeline migration to reference the quoted camelCase `Document."filePath"` column used by the application schema.
 - 2026-10-13 — Made prescription timeline confirmation idempotent with stable extraction/document references and a unique database index, merged document and event rows by prescription identity (preserving distinct same-date prescriptions), repaired mirrors on already-confirmed retries, and refreshed no-store timeline state on entry and after confirmation.
 - 2026-10-12 — Unconfirmed Prescription Review/Discard Lifecycle, Accurate Provenance Attribution, and UI Refinements:

@@ -21,8 +21,8 @@ Owner: TBD
 | **File** | `model/final_prescription_ocr_service_windows.py` |
 | **Variable** | `SYSTEM_PROMPT` |
 | **Used in** | `call_gemini()` → `GenerateContentConfig(system_instruction=SYSTEM_PROMPT)` |
-| **Model** | First available in `MODEL_CANDIDATES` — primary: `gemini-2.5-flash` |
-| **Parameters** | `response_mime_type="application/json"`, `response_schema=Prescription`, per-model timeout 30s, 2 retries per model |
+| **Model** | First available in `MODEL_CANDIDATES` — primary: `gemini-3.8-flash` |
+| **Parameters** | `response_mime_type="application/json"`, `response_schema=Prescription`, per-model HTTP timeout 20s, one attempt per model |
 
 ### Exact Prompt Text (Confirmed — copied from code)
 
@@ -109,15 +109,11 @@ The response is validated against the `Prescription` Pydantic model. See [docs/a
 
 ```python
 MODEL_CANDIDATES = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
+    "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
 ]
 ```
 

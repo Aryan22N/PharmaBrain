@@ -206,7 +206,7 @@ sequenceDiagram
 ---
 
 ### 4.5. Multimodal LLM Vision Structuring
-**Function:** `call_gemini(lines, image_path=None, retries_per_model=2)`  
+**Function:** `call_gemini(lines, image_path=None, retries_per_model=GEMINI_RETRIES_PER_MODEL)`
 **Location:** `model/final_prescription_ocr_service_windows.py` (lines 675–755)
 
 **Actual Implementation Logic:**
@@ -220,18 +220,14 @@ sequenceDiagram
 * **Model Candidates & Fallback List**:
   ```python
   MODEL_CANDIDATES = [
-      "gemini-2.5-flash",
-      "gemini-2.5-pro",
-      "gemini-2.0-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-flash-lite-latest",
-      "gemini-3.5-flash",
-      "gemini-flash-latest",
+      "gemini-3.8-flash",
       "gemini-3.7-flash",
-      "gemini-3.1-flash-lite"
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-2.5-flash"
   ]
   ```
-* **Execution Timeout & Fallback**: Each call is executed in a thread pool with a 30-second timeout (`future.result(timeout=30)`). If an HTTP 503, 429, 404, or UNAVAILABLE error occurs, it immediately fast-fails to the next model in `MODEL_CANDIDATES`.
+* **Execution Timeout & Fallback**: Each SDK HTTP call has a 20-second timeout and SDK retries are disabled. Timeout, HTTP 503, 429, 404, or UNAVAILABLE errors immediately move to the next model. The bounded fallback attempts take at most about 100 seconds for five candidates. If structuring fails, the raw OCR remains saved and a repeated upload resumes from that row rather than being discarded as a duplicate.
 
 ---
 

@@ -56,39 +56,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Duplicate Guard: Check SHA256 & file duplicates before running OCR engine
+    // The Python service owns hash deduplication because it can distinguish
+    // saved OCR awaiting structuring from a completed extraction.
     const fileBytes = Buffer.from(await file.arrayBuffer());
-    const crypto = await import("crypto");
-    const fileSha256 = crypto.createHash("sha256").update(fileBytes).digest("hex");
-
-    try {
-      const { query } = await import("@/lib/db");
-      const existingDoc = await query(
-        `SELECT id, "originalName" FROM "Document"
-         WHERE ("userId" = $1 OR "patientId" = $2)
-           AND status != 'DISCARDED'
-           AND ("storedFilename" LIKE $3 OR "originalName" = $4)
-         LIMIT 1;`,
-        [userId, effectivePatientId, `%${fileSha256.slice(0, 16)}%`, file.name]
-      );
-
-      if (existingDoc.length > 0) {
-        console.warn(`[API/OCR] Duplicate prescription detected for patient ${effectivePatientId}. Upload discarded.`);
-        return NextResponse.json(
-          {
-            error: `Duplicate prescription upload detected. This exact image (${file.name}) has already been uploaded for patient #${effectivePatientId}. The duplicate upload was automatically discarded without running OCR to prevent redundant records.`,
-            duplicate_discarded: true,
-          },
-          { status: 409 }
-        );
-      }
-    } catch (dbCheckErr) {
-      console.warn("Pre-upload DB duplicate check error:", dbCheckErr);
-    }
 
     // Prepare outbound multipart form data for Python FastAPI
     const startTime = Date.now();
-    console.log(`[${new Date().toISOString()}] [API/OCR] Processing prescription (size=${file.size} bytes, type=${file.type}, filename=${file.name}, patientId=${effectivePatientId}, sha256=${fileSha256.slice(0, 12)})`);
+    console.log(`[${new Date().toISOString()}] [API/OCR] Processing prescription image (size=${file.size} bytes, type=${file.type})`);
 
     const backendFormData = new FormData();
     const uploadBlob = new Blob([fileBytes], { type: file.type });
@@ -119,6 +93,25 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[${new Date().toISOString()}] [API/OCR] Pipeline completed successfully in ${elapsedMs}ms`);
+
+    const { query } = await import("@/lib/db");
+    const extractionData = result.data as any;
+    const extractionId = extractionData?.extraction_id;
+    if (extractionId) {
+      const existingDocs = await query(
+        `SELECT d."storedFilename", a."structuredResult"
+         FROM "Document" d
+         LEFT JOIN "Analysis" a ON a."documentId" = d.id
+         WHERE d."userId" = $1 AND d."patientId" = $2
+           AND d."filePath" = $3 AND d.status != 'DISCARDED'
+         ORDER BY d.id DESC LIMIT 1;`,
+        [userId, effectivePatientId, `/extractions/${extractionId}`]
+      );
+      if (existingDocs.length > 0) {
+        extractionData.image_url = existingDocs[0].storedFilename || "/sample_prescription.png";
+        return NextResponse.json(extractionData);
+      }
+    }
 
     // Save uploaded image to Supabase Storage Bucket (with local fallback if unconfigured)
     let publicImageUrl = "/sample_prescription.png";
@@ -153,9 +146,6 @@ export async function POST(req: NextRequest) {
 
     // Immediately save to Patient Summary as NOT CONFIRMED so it appears in the dashboard
     try {
-      const { query } = await import("@/lib/db");
-      const extractionData = result.data as any;
-      const extractionId = extractionData?.extraction_id;
       const rec = extractionData?.record || {};
       rec.image_url = publicImageUrl;
       const hospitalName = rec.hospital || file.name.replace(/\.[^/.]+$/, "");

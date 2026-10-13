@@ -61,16 +61,14 @@ CRITICAL_FIELDS = ("name", "strength", "frequency", "duration")   # a wrong valu
 
 # ---- LLM ------------------------------------------------------------------------------------------------
 MODEL_CANDIDATES = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
+    "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
 ]
+GEMINI_REQUEST_TIMEOUT_MS = 20000
+GEMINI_RETRIES_PER_MODEL = 1
 SEND_IMAGE_TO_LLM = True    # True = Gemini receives image to read handwriting directly with high precision
 USE_UNWARPING = False       # True for curved / photographed pages
 
@@ -600,7 +598,13 @@ from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(
+        timeout=GEMINI_REQUEST_TIMEOUT_MS,
+        retry_options={"attempts": 1},
+    ),
+)
 
 
 class Val(BaseModel):
@@ -691,7 +695,7 @@ CRITICAL RULES FOR HIGH ACCURACY & HANDWRITING TRANSCRIPTION:
 6. FORMAT: Return ONLY valid JSON adhering strictly to the provided Prescription schema."""
 
 
-def call_gemini(lines, image_path=None, retries_per_model=2):
+def call_gemini(lines, image_path=None, retries_per_model=GEMINI_RETRIES_PER_MODEL):
 
     contents = [
         f"OCR LINES:\n{lines_to_prompt_block(lines)}"
@@ -734,15 +738,11 @@ def call_gemini(lines, image_path=None, retries_per_model=2):
                     flush=True
                 )
 
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(
-                        client.models.generate_content,
-                        model=model_name,
-                        contents=contents,
-                        config=cfg
-                    )
-                    response = future.result(timeout=30)
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=cfg,
+                )
 
                 prescription = Prescription.model_validate_json(
                     response.text
@@ -759,7 +759,7 @@ def call_gemini(lines, image_path=None, retries_per_model=2):
                 last_error = str(e)
                 print(f"[{model_name}] Error: {last_error[:200]}")
                 # If model is experiencing temporary demand spikes (503/429) or is not found/deprecated (404), fast-fail to next model immediately
-                if any(code in last_error for code in ("503", "UNAVAILABLE", "429", "404", "NOT_FOUND")):
+                if any(code in last_error for code in ("503", "UNAVAILABLE", "429", "404", "NOT_FOUND", "Timeout")):
                     print(f"{model_name} currently unavailable or not found, immediately falling back to next candidate...\n")
                     break
                 if attempt < retries_per_model - 1:
@@ -1132,7 +1132,24 @@ def _payload(extraction_id, raw_id, status, analysis, model, duplicate=False):
     return dict(ocr_id=raw_id, extraction_id=extraction_id, status=status, llm_model=model, duplicate=duplicate, **analysis)
 
 
+_structure_locks_guard = threading.Lock()
+_structure_locks = {}
+
+
+def _structure_lock_for(raw_id):
+    with _structure_locks_guard:
+        if raw_id not in _structure_locks:
+            _structure_locks[raw_id] = threading.Lock()
+        return _structure_locks[raw_id]
+
+
 def structure_from_raw(raw_id, expected_name=None, image_path=None):
+    """Serialize retries per OCR record and reuse any extraction already created."""
+    with _structure_lock_for(raw_id):
+        return _structure_from_raw_locked(raw_id, expected_name, image_path)
+
+
+def _structure_from_raw_locked(raw_id, expected_name=None, image_path=None):
     """Step 4-6: run the LLM on the STORED raw OCR (also used to retry after an LLM failure without re-running OCR)."""
     t_start = time.time()
     log_stage("DB_FETCH", f"Fetching stored raw OCR lines for raw_ocr_id={raw_id}")
@@ -1141,6 +1158,23 @@ def structure_from_raw(raw_id, expected_name=None, image_path=None):
     if not row:
         log_stage("ERROR", f"raw_ocr row #{raw_id} not found in database")
         raise PipelineError("raw_ocr row not found", http=404)
+    if not image_path and SEND_IMAGE_TO_LLM:
+        cached_image = os.path.join(PRE_DIR, f"{row['image_sha256'][:16]}.png")
+        if os.path.isfile(cached_image):
+            image_path = cached_image
+    with engine.connect() as c:
+        existing = c.execute(
+            select(extractions)
+            .where(extractions.c.raw_ocr_id == raw_id, extractions.c.status != "DISCARDED")
+            .order_by(extractions.c.id.desc())
+            .limit(1)
+        ).mappings().first()
+    if existing:
+        log_stage("STRUCTURING_REUSED", f"Returning existing extraction #{existing['id']} for raw_ocr_id={raw_id}")
+        return _payload(
+            existing["id"], raw_id, existing["status"],
+            json.loads(existing["analysis_json"]), existing["llm_model"], duplicate=True,
+        )
     lines = json.loads(row["lines_json"])
     by_id = {l["id"]: l for l in lines}
     log_stage("LLM_STRUCTURING", f"Invoking Google Gemini on {len(lines)} OCR lines...")
@@ -1174,17 +1208,23 @@ def structure_from_raw(raw_id, expected_name=None, image_path=None):
 def process_image(data: bytes, filename: str, patient_id: str, expected_name: Optional[str] = None):
     t_pipeline_start = time.time()
     sha = hashlib.sha256(data).hexdigest()
-    log_stage("UPLOAD_RECEIVED", f"Processing upload: filename='{filename}', size={len(data)} bytes, sha256={sha[:12]}...")
+    log_stage("UPLOAD_RECEIVED", f"Processing prescription image ({len(data)} bytes)")
 
-    # Duplicate Upload Guard: Check if identical image has already been uploaded for this patient
+    # Reuse saved OCR instead of treating an incomplete pipeline attempt as a finished duplicate.
     with engine.connect() as c:
         hit = c.execute(
             select(raw_ocr.c.id)
             .where(raw_ocr.c.image_sha256 == sha, raw_ocr.c.patient_id == patient_id)
         ).first()
     if hit:
-        log_stage("DUPLICATE_DISCARDED", f"Duplicate image upload detected for patient {patient_id} (sha256={sha[:12]}). OCR service skipped and upload discarded.", time.time() - t_pipeline_start)
-        raise PipelineError(f"Duplicate prescription image detected. This exact prescription has already been uploaded for patient #{patient_id}. The duplicate upload was automatically discarded without running OCR to prevent redundant records.", http=409)
+        raw_id = hit[0]
+        log_stage("DUPLICATE_RESUME", "Reusing saved OCR for matching upload", time.time() - t_pipeline_start)
+        try:
+            path, _ = preprocess_image(data)
+        except Exception as e:
+            log_stage("WARNING", f"Could not prepare image for saved-OCR retry: {type(e).__name__}")
+            path = None
+        return structure_from_raw(raw_id, expected_name, path)
 
     t_prep = time.time()
     try:
@@ -1387,7 +1427,7 @@ def api_ocr_info():
 @app.post("/ocr", dependencies=[Depends(require_key)])
 def api_ocr(file: UploadFile = File(...), patient_id: str = Form(...), patient_name: Optional[str] = Form(None)):
     t0 = time.time()
-    log_stage("ENDPOINT_OCR", f"Received POST /ocr request: filename='{file.filename}', content_type='{file.content_type}'")
+    log_stage("ENDPOINT_OCR", f"Received POST /ocr request (content_type='{file.content_type}')")
     ctype = (file.content_type or "").lower().strip()
     if ctype not in ALLOWED_TYPES and not (file.filename or "").lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
         log_stage("ERROR", f"Rejected unsupported file type: '{file.content_type}'")
@@ -1689,7 +1729,7 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 
 if __name__ == "__main__":
     print("Starting local Prescription OCR API...")
-    print("API token:", API_TOKEN)
+    print("API token configured:", bool(API_TOKEN))
     print(f"Health check: http://{HOST}:{PORT}/health")
     print(f"API docs:    http://{HOST}:{PORT}/docs")
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")

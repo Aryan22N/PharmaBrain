@@ -29,7 +29,7 @@ export async function POST(
 
     if (!result.ok) {
       return NextResponse.json(
-        { error: result.error || "Structuring failed" },
+        { error: result.error || "Structuring failed", raw_ocr_id: result.rawOcrId ?? Number(ocrId) },
         { status: result.status }
       );
     }

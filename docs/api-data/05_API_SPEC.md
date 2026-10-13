@@ -145,7 +145,9 @@ curl -X POST http://localhost:8000/ocr \
 | 415 | Unsupported file type |
 | 422 | No text found in image |
 | 500 | OCR inference failed |
-| 502 | All Gemini models failed |
+| 502 | Gemini structuring failed; `raw_ocr_id` is returned so structuring can be retried without rerunning OCR |
+
+If an identical image is uploaded again for a patient, the backend reuses its stored OCR. If an extraction already exists, it returns that extraction; if OCR was saved but structuring failed, it retries structuring from the saved OCR instead of discarding the upload.
 
 ---
 
@@ -375,14 +377,14 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 
 | Route | Method | Proxies to Python | Notes |
 |---|---|---|---|
-| `/api/ocr` | POST | `POST /ocr` | Uploads image to Supabase Storage Bucket (`OCR_Images/uploads/`), checks SHA256 duplicate image hash, creates `Document` & `Analysis` records, returns `image_url` |
+| `/api/ocr` | POST | `POST /ocr` | Uploads image to Supabase Storage Bucket (`OCR_Images/uploads/`) after processing; backend SHA256 deduplication reuses saved OCR or an existing extraction; creates `Document` & `Analysis` only when that extraction has no existing document |
 | `/api/confirm/[id]` | POST | `POST /confirm/{id}` | Confirms prescription, treats an already-confirmed extraction as an idempotent mirror-repair request, upserts one verified timeline event using a stable prescription reference, preserves public `image_url` on `Document.storedFilename` & `Analysis.structuredResult`, and mirrors vitals to `observations` |
 | `/api/patient/documents/[id]/confirm` | POST | — | Confirms a patient-owned document, upserts its verified timeline mirror by extraction/document identity, and returns an error if the timeline event could not be persisted |
 | `/api/discard/[id]` | POST | `POST /discard/{id}` | Purges draft from PostgreSQL (`Document`, `Analysis`, and unconfirmed `patient_timeline_events`), and notifies Python backend |
 | `/api/extractions/[id]` | GET | `GET /extractions/{id}` | Fetches extraction draft from Python backend, with resilient fallback to PostgreSQL `Document` & `Analysis` tables if Python memory cache has expired |
 | `/api/extractions` | GET | `GET /extractions` | Lists recent extractions |
 | `/api/raw-ocr/[id]` | GET | `GET /raw_ocr/{id}` | Fetches raw bounding boxes and line coordinates |
-| `/api/structure/[id]` | POST | `POST /structure/{id}` | Re-triggers LLM structuring on stored raw OCR |
+| `/api/structure/[id]` | POST | `POST /structure/{id}` | Re-triggers LLM structuring on stored raw OCR; includes the raw OCR ID on failure so the patient can retry |
 | `/api/patients/[id]/prescriptions` | GET | `GET /patients/{id}/prescriptions` | Fetches confirmed prescriptions for patient |
 | `/api/patients/[id]/observations` | GET | `GET /patients/{id}/observations` | Fetches vital observations time-series |
 | `/api/patient/trends` | GET | `POST /patients/{patient_id}/trends_summary` | Evaluates longitudinal statistical trends (AHA/ACC BP, ADA glucose), deltas, and Gemini AI patient narrative |

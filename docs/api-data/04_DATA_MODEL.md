@@ -185,7 +185,7 @@ Stores the output of PaddleOCR for each uploaded image, before any LLM call.
 | Column | Type | Constraint | Purpose |
 |---|---|---|---|
 | `id` | Integer | PK, autoincrement | Row ID |
-| `image_sha256` | String(64) | Indexed | SHA-256 of the raw uploaded bytes — used for deduplication |
+| `image_sha256` | String(64) | Indexed | SHA-256 of raw uploaded bytes — duplicate uploads reuse this OCR row and resume structuring when no extraction exists |
 | `patient_id` | String(64) | Indexed | Patient UHID or 9-digit ID provided at upload |
 | `filename` | String(255) | — | Original filename |
 | `ocr_engine` | String(64) | — | `"PaddleOCR"` or `"PaddleOCR-VL"` |

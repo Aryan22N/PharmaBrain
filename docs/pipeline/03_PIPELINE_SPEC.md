@@ -147,7 +147,7 @@ sequenceDiagram
 
 ## Stage 5 — LLM Structuring
 
-**Function:** `call_gemini(lines, image_path, retries_per_model=2)` → `(Prescription, model_name)`  
+**Function:** `call_gemini(lines, image_path, retries_per_model=GEMINI_RETRIES_PER_MODEL)` → `(Prescription, model_name)`
 **Location:** `model/final_prescription_ocr_service_windows.py` → `call_gemini()`  
 **Claim:** Confirmed
 
@@ -166,12 +166,12 @@ sequenceDiagram
 | `response_mime_type` | `"application/json"` | `cfg` in `call_gemini()` |
 | `response_schema` | `Prescription` Pydantic model | `cfg` in `call_gemini()` |
 | `system_instruction` | `SYSTEM_PROMPT` string | `cfg` in `call_gemini()` |
-| Per-model timeout | 30 seconds | `future.result(timeout=30)` |
-| Retries per model | 2 | `retries_per_model=2` default |
-| Model candidate list | 9 models, `gemini-2.5-flash` first | `MODEL_CANDIDATES` constant |
+| Per-model HTTP timeout | 20 seconds | `GEMINI_REQUEST_TIMEOUT_MS` in Google Gen AI `HttpOptions` |
+| Retries per model | 1 attempt | `GEMINI_RETRIES_PER_MODEL` constant; SDK automatic retries disabled |
+| Model candidate list | Current documented candidates, `gemini-3.8-flash` first | `MODEL_CANDIDATES` constant |
 | `SEND_IMAGE_TO_LLM` | `True` | Module-level constant |
 
-**Fallback logic:** For each model in `MODEL_CANDIDATES`, attempt up to `retries_per_model` times. On 503/429/404 errors → immediate fast-fail to next model. On other errors → wait 2 s, retry. If all candidates exhausted → `RuntimeError` → wrapped as `PipelineError(http=502)`.
+**Fallback logic:** Each candidate receives one bounded HTTP request. On 503/429/404 errors and timeouts, immediately move to the next model. If all candidates fail, `RuntimeError` is wrapped as `PipelineError(http=502)` with the saved `raw_ocr_id`, so the caller can retry structuring without rerunning OCR. The five-candidate model-call time is bounded to about 100 seconds plus validation and database work.
 
 **Schema enforcement:** `Prescription.model_validate_json(response.text)` — Pydantic v2 validates the JSON against the schema. Any validation error is treated as a model failure and triggers fallback.
 
@@ -241,7 +241,7 @@ Temperature: classified as `F` if value >= 90 else `C`; bounds checked according
 **Location:** `model/final_prescription_ocr_service_windows.py` → `process_image()`  
 **Claim:** Confirmed
 
-Raw OCR is committed to the `raw_ocr` table **before** calling the LLM. This ensures the source text is preserved even if all Gemini calls fail, enabling later retry via `POST /structure/{ocr_id}`.
+Raw OCR is committed to the `raw_ocr` table **before** calling the LLM. This ensures the source text is preserved even if all Gemini calls fail. Re-uploading an identical image reuses that row and resumes structuring; per-record locking prevents concurrent retries from creating duplicate extractions. A completed extraction is returned idempotently. The user can also retry via `POST /structure/{ocr_id}`.
 
 ---
 
