@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-13 — Fixed the patient timeline showing a confirmed prescription as a draft after save: confirmation refreshes the mounted dashboard before redirect, timeline entry refreshes again, and dashboard requests/responses disable caching.
 - 2026-10-13 — Made prescription uploads recoverable after Gemini or network failures: identical re-uploads resume from saved OCR or return the existing draft, the upload UI retains the selected image for retry, and document persistence is idempotent by extraction ID.
 - 2026-10-13 — Patient trends now include explicitly verified prescription timeline events when legacy confirmations are missing their `confirmed_prescriptions` or `CONFIRMED` document mirror, fixing undercounted clinical date eligibility.
 - 2026-10-13 — Fixed patient trend record matching for legacy patient identifiers and serialized analysis JSON, linked observations to documents by extraction ID as well as document ID, and removed patient-identifying values from trend logs.

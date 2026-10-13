@@ -11,6 +11,7 @@ import {
   ConfirmResult,
 } from "@/lib/types";
 import { clientApi } from "@/lib/api";
+import { usePatientDashboard } from "@/app/patient/context";
 import { GateBadge } from "@/components/StatusBadge";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { MedicineEditor } from "@/components/MedicineEditor";
@@ -44,6 +45,7 @@ export default function PatientDocumentDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const { refresh } = usePatientDashboard();
 
   const [payload, setPayload] = useState<ExtractionPayload | null>(null);
   const [record, setRecord] = useState<PrescriptionRecord | null>(null);
@@ -161,6 +163,10 @@ export default function PatientDocumentDetailPage({
       setError(null);
       setPayload((prev) => (prev ? { ...prev, status: "CONFIRMED" } : null));
 
+      // Wait for the server-backed dashboard snapshot before navigating. The
+      // patient layout keeps its provider mounted across route changes.
+      await refresh();
+
       // Auto redirect to medical timeline after confirmation
       setTimeout(() => {
         router.push("/patient/timeline");
@@ -178,6 +184,7 @@ export default function PatientDocumentDetailPage({
           observations_saved: 0,
           observations_skipped: [],
         });
+        await refresh();
         setTimeout(() => {
           router.push("/patient/timeline");
         }, 1800);

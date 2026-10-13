@@ -572,7 +572,7 @@ export async function GET(request: Request) {
           imageUrl,
         };
       }),
-    });
+    }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error: any) {
     console.error('Dashboard User API Error:', error);
     return NextResponse.json(

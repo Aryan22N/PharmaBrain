@@ -395,7 +395,7 @@ The frontend's API routes are in `frontend/app/api/`. They enforce JWT auth, the
 | `/api/auth` | POST | — | Login/register, returns JWT cookie |
 | `/api/user` | GET | — | Current user info from DB |
 | `/api/user/onboarding` | POST, GET | — | Saves & retrieves patient initial profile context (`patient_onboarding` table) |
-| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl` |
+| `/api/user/dashboard` | GET | — | Returns patient profile, timeline, vitals trends, `longitudinalSummary` (dynamically synthesized from `conditions`, `observations`, and active medications), `conflictingMedicines`, and `pendingDocuments` with resolved public Supabase Storage `imageUrl`. Sends `Cache-Control: no-store`; the patient client also fetches with `cache: no-store` so confirmation state is refreshed from the server. |
 | `/api/user/save-ocr` | POST | — | Direct helper to persist confirmed OCR payload into `Document` and `Analysis` tables |
 
 ---

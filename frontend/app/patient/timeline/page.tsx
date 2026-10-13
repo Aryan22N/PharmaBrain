@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Clock,
   Plus,
@@ -34,6 +34,12 @@ export default function MedicalTimelinePage() {
     setSelectedSummaryRecord,
     setAddTimelineModalOpen,
   } = usePatientDashboard();
+
+  // The dashboard provider stays mounted during patient-route navigation, so
+  // refresh when returning here after an upload or confirmation.
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const [discardingId, setDiscardingId] = useState<string | number | null>(null);
 

@@ -255,6 +255,7 @@ export function PatientDashboardProvider({ children }: { children: React.ReactNo
       }
 
       const res = await fetch("/api/user/dashboard", {
+        cache: "no-store",
         headers: { Authorization: `Bearer ${token}` },
       });
 
