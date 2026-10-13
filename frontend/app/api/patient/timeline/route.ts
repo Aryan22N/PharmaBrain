@@ -132,22 +132,6 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    // 2. Query patient's custom/added timeline events
-    let customEvents: any[] = [];
-    try {
-      customEvents = await query(
-        `SELECT id, patient_id, user_id, event_date, category, title, description,
-                source, reliability, verification_status, facility, doctor, reference_id,
-                is_conflicting, conflict_details, created_at
-         FROM patient_timeline_events
-         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
-         ORDER BY event_date DESC, id DESC;`,
-        [patientIds, payload.userId]
-      );
-    } catch (e) {
-      console.warn("Could not query patient_timeline_events:", e);
-    }
-
     const unifiedTimeline = mergeTimelineEvents(customEvents, docTimelineEvents);
 
     return NextResponse.json({

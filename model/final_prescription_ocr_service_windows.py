@@ -61,14 +61,16 @@ CRITICAL_FIELDS = ("name", "strength", "frequency", "duration")   # a wrong valu
 
 # ---- LLM ------------------------------------------------------------------------------------------------
 MODEL_CANDIDATES = [
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
 ]
 GEMINI_REQUEST_TIMEOUT_MS = 20000
-GEMINI_RETRIES_PER_MODEL = 1
+GEMINI_RETRIES_PER_MODEL = 2
 SEND_IMAGE_TO_LLM = True    # True = Gemini receives image to read handwriting directly with high precision
 USE_UNWARPING = False       # True for curved / photographed pages
 
@@ -758,9 +760,9 @@ def call_gemini(lines, image_path=None, retries_per_model=GEMINI_RETRIES_PER_MOD
             except Exception as e:
                 last_error = str(e)
                 print(f"[{model_name}] Error: {last_error[:200]}")
-                # If model is experiencing temporary demand spikes (503/429) or is not found/deprecated (404), fast-fail to next model immediately
-                if any(code in last_error for code in ("503", "UNAVAILABLE", "429", "404", "NOT_FOUND", "Timeout")):
-                    print(f"{model_name} currently unavailable or not found, immediately falling back to next candidate...\n")
+                # If model is deprecated or not found (404), fast-fail to next model immediately
+                if any(code in last_error for code in ("404", "NOT_FOUND")):
+                    print(f"{model_name} not found or deprecated, immediately falling back to next candidate...\n")
                     break
                 if attempt < retries_per_model - 1:
                     print("Retrying in 2 seconds...\n")

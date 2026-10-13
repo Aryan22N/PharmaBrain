@@ -458,7 +458,7 @@ RULES FOR GENERATION:
   "safetyDisclaimer": "Informational health analysis only. All clinical treatment decisions, drug dosages, and diagnosis must be confirmed directly with your licensed physician."
 }`;
 
-  const candidateModels = ["gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-pro-latest"];
+  const candidateModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest"];
   let lastError: { code: string; message: string } | null = null;
 
   for (const modelName of candidateModels) {

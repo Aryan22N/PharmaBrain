@@ -416,39 +416,6 @@ export async function GET(request: Request) {
       }
     });
 
-    let timelineEvents: any[] = [];
-    let recordedMedicines: any[] = [];
-    try {
-      timelineEvents = await query(
-        `SELECT id, patient_id, user_id, event_date, category, title, description,
-                source, reliability, verification_status, facility, doctor, reference_id,
-                is_conflicting, conflict_details, created_at
-         FROM patient_timeline_events
-         WHERE patient_id = ANY($1::text[]) OR user_id = $2
-         ORDER BY event_date DESC, id DESC;`,
-        [patientIds, user.id]
-      );
-    } catch (tlErr) {
-      console.warn("Could not query patient_timeline_events:", tlErr);
-    }
-
-    try {
-      recordedMedicines = await query(
-        `SELECT id, patient_id, user_id, name, normalized_name, strength, status, indication,
-                frequency, route, start_date, expected_end_date, actual_end_date,
-                COALESCE(actual_end_date, expected_end_date) AS end_date,
-                duration_raw, duration_days, doctor, reference_id,
-                reconciliation_category, reconciliation_notes,
-                is_conflicting, conflict_details, source, reliability, verification_status, created_at
-         FROM patient_medications
-         WHERE patient_id = ANY($1::text[]) OR (patient_id IS NULL AND user_id = $2)
-         ORDER BY CASE WHEN status = 'ACTIVE' THEN 0 ELSE 1 END, start_date DESC NULLS LAST, id DESC;`,
-        [patientIds, user.id]
-      );
-    } catch (medErr) {
-      console.warn("Could not query patient_medications:", medErr);
-    }
-
     // Merge document and persisted-event views by prescription identity. A
     // title/date match is not sufficient because distinct prescriptions may
     // share a date and similar titles.
