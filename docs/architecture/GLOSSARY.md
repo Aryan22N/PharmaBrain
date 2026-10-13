@@ -21,7 +21,7 @@ Owner: TBD
 | **CORS** | Cross-Origin Resource Sharing — browser security mechanism restricting which websites can call an API. |
 | **dev token** | The hardcoded development API token `rx_local_dev_token_2026_secure`. Must not be used in production. |
 | **DPDPA 2023** | Digital Personal Data Protection Act, 2023 — India's primary data protection legislation governing how personal data (including health data) is collected, stored, and processed. |
-| **duplicate** | In this system: the same prescription image uploaded again for the same patient. Detected by SHA-256 hash match. Returns `duplicate: true` without re-processing. |
+| **duplicate** | The same prescription image uploaded again for the same patient. A completed non-discarded extraction is returned; a raw OCR-only attempt is resumed from its saved OCR and the re-uploaded image. |
 | **EXIF** | Exchangeable Image File Format — metadata embedded in JPEG images from cameras, including orientation. `ImageOps.exif_transpose()` corrects orientation from EXIF data. |
 | **extraction** | One row in the `extractions` table — the LLM-structured draft prescription awaiting human confirmation. Status: `PENDING_USER_CONFIRMATION`, `CONFIRMED`, or `DISCARDED`. |
 | **extractions** | The PostgreSQL table storing LLM draft extractions and quality gate results before human confirmation. |

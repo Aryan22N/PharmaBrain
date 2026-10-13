@@ -27,7 +27,7 @@ export async function GET(
       return NextResponse.json({ error: 'Patient ID is required.' }, { status: 400 });
     }
 
-    const normalizedId = rawPatientId.trim().toUpperCase();
+    const normalizedId = decodeURIComponent(rawPatientId).trim().replace(/\s+/g, '-').toUpperCase();
 
     // 2. Fetch Patient Account from Database
     const patientRows = await query<{
@@ -43,6 +43,7 @@ export async function GET(
        FROM "User"
        WHERE role = 'PATIENT' AND (
          UPPER("patientId") = $1 OR
+         UPPER(REPLACE(COALESCE("patientId", ''), ' ', '-')) = $1 OR
          UPPER(COALESCE("legacyPatientId", '')) = $1
        )
        LIMIT 1;`,
@@ -114,7 +115,6 @@ export async function GET(
           patient.patientId,
           patient.legacyPatientId,
           String(patient.id),
-          '483027156', // Backward-compatibility mapping for Rahul Sharma if matches
         ].filter((id): id is string => Boolean(id))
       )
     );
@@ -144,6 +144,30 @@ export async function GET(
       const isConfirmed = doc.status === 'CONFIRMED';
       const sr = (doc.structuredResult || {}) as Record<string, unknown>;
 
+      let docName = 'Attending Physician';
+      let docRegNo: string | null = null;
+      if (typeof sr.doctor === 'string' && sr.doctor.trim()) {
+        docName = sr.doctor.trim();
+      } else if (typeof sr.doctor === 'object' && sr.doctor !== null) {
+        const dObj = sr.doctor as { name?: string; reg_no?: string };
+        if (dObj.name && typeof dObj.name === 'string') {
+          docName = dObj.name.trim();
+        }
+        if (dObj.reg_no && typeof dObj.reg_no === 'string') {
+          docRegNo = dObj.reg_no.trim();
+        }
+      }
+
+      let hospName = 'Medical Facility';
+      if (typeof sr.hospital === 'string' && sr.hospital.trim()) {
+        hospName = sr.hospital.trim();
+      } else if (typeof sr.hospital === 'object' && sr.hospital !== null) {
+        const hObj = sr.hospital as { name?: string };
+        if (hObj.name && typeof hObj.name === 'string') {
+          hospName = hObj.name.trim();
+        }
+      }
+
       return {
         id: doc.id,
         originalName: doc.originalName,
@@ -154,8 +178,9 @@ export async function GET(
         uploadedAt: doc.uploadedAt,
         summary: doc.summary,
         structuredResult: {
-          doctor: sr.doctor || 'Attending Physician',
-          hospital: sr.hospital || 'Medical Facility',
+          doctor: docName,
+          doctor_reg_no: docRegNo,
+          hospital: hospName,
           dateIso: sr.date_iso || null,
           medicines: sr.medicines || [],
           vitals: sr.vitals || [],
@@ -211,9 +236,32 @@ export async function GET(
       [patientIds, patient.id]
     );
 
-    const activeMedicines = medRows.filter((m) => m.status === 'ACTIVE');
-    const historyMedicines = medRows.filter((m) => m.status === 'COMPLETED' || m.status === 'DISCONTINUED');
-    const reviewMedicines = medRows.filter(
+    const sanitizedMedRows = medRows.map((m) => {
+      let doctorStr = 'Attending';
+      if (typeof m.doctor === 'string') {
+        const trimmed = m.doctor.trim();
+        if (trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            doctorStr = parsed.name || trimmed;
+          } catch {
+            doctorStr = trimmed;
+          }
+        } else if (trimmed) {
+          doctorStr = trimmed;
+        }
+      } else if (typeof m.doctor === 'object' && m.doctor !== null) {
+        doctorStr = (m.doctor as { name?: string }).name || 'Attending';
+      }
+      return {
+        ...m,
+        doctor: doctorStr,
+      };
+    });
+
+    const activeMedicines = sanitizedMedRows.filter((m) => m.status === 'ACTIVE');
+    const historyMedicines = sanitizedMedRows.filter((m) => m.status === 'COMPLETED' || m.status === 'DISCONTINUED');
+    const reviewMedicines = sanitizedMedRows.filter(
       (m) =>
         Boolean(m.is_conflicting) ||
         (m.reconciliation_category &&
@@ -249,10 +297,74 @@ export async function GET(
       [patientIds]
     );
 
+    // Merge any vitals parsed in documents that aren't yet in observations table
+    const combinedObs: ObservationRecordRow[] = [...rawObs];
+    formattedDocuments.forEach((doc) => {
+      const sr = (doc.structuredResult || {}) as Record<string, unknown>;
+      const docVitals = Array.isArray(sr.vitals) ? sr.vitals : [];
+      const docDate = (sr.dateIso as string) || (doc.uploadedAt ? new Date(doc.uploadedAt).toISOString().split('T')[0] : null);
+
+      docVitals.forEach((v: any, idx: number) => {
+        if (!v || typeof v !== 'object') return;
+        const parsed = v.parsed || {};
+        let kind = v.kind;
+        const vName = (v.name || '').toLowerCase();
+        if (!kind) {
+          if (vName.includes('bp') || vName.includes('blood pressure')) kind = 'bp';
+          else if (vName.includes('pulse') || vName.includes('pr') || vName.includes('hr')) kind = 'pulse';
+          else if (vName.includes('spo2') || vName.includes('o2')) kind = 'spo2';
+          else if (vName.includes('temp')) kind = 'temp';
+          else if (vName.includes('hba1c') || vName.includes('a1c')) kind = 'hba1c';
+          else if (vName.includes('fbs') || vName.includes('fasting')) kind = 'sugar_fasting';
+          else if (vName.includes('sugar') || vName.includes('rbs') || vName.includes('glucose')) kind = 'sugar_random';
+          else if (vName.includes('weight') || vName.includes('wt')) kind = 'weight';
+          else if (vName.includes('bmi')) kind = 'bmi';
+          else if (vName.includes('creatinine')) kind = 'creatinine';
+          else return;
+        }
+
+        let sys = parsed.systolic ?? null;
+        let dia = parsed.diastolic ?? null;
+        let val = parsed.value ?? null;
+        const uStr = parsed.unit ?? (kind === 'bp' ? 'mmHg' : '');
+
+        if (kind === 'bp' && (sys === null || dia === null)) {
+          const m = String(v.value || '').match(/(\d{2,3})\s*\/\s*(\d{2,3})/);
+          if (m) {
+            sys = Number(m[1]);
+            dia = Number(m[2]);
+          }
+        } else if (val === null && v.value) {
+          const mVal = String(v.value).match(/(\d+(?:\.\d+)?)/);
+          if (mVal) val = Number(mVal[1]);
+        }
+
+        const alreadyExists = combinedObs.some(
+          (o) => o.prescription_id === doc.id || (o.obs_date === docDate && o.kind === kind)
+        );
+        if (!alreadyExists && (sys != null || val != null)) {
+          combinedObs.push({
+            id: 100000 + doc.id * 10 + idx,
+            patient_id: patient.patientId || String(patient.id),
+            prescription_id: doc.id,
+            obs_date: docDate,
+            kind,
+            systolic: sys,
+            diastolic: dia,
+            value: val,
+            unit: uStr,
+            raw_text: `${v.name || ''} ${v.value || ''}`.trim(),
+            created_at: doc.uploadedAt,
+          });
+        }
+      });
+    });
+    combinedObs.sort((a, b) => new Date(a.obs_date || '1970-01-01').getTime() - new Date(b.obs_date || '1970-01-01').getTime());
+
     // 4.4 Longitudinal Trends
     const trends = calculatePatientTrends(
       patient.patientId || String(patient.id),
-      rawObs,
+      combinedObs,
       documents
     );
 
@@ -271,6 +383,33 @@ export async function GET(
     );
 
     const onboarding = onboardingRows[0] || null;
+
+    // 4.6 Query Patient Conditions & Allergies from DB tables
+    let dbConditions: any[] = [];
+    try {
+      dbConditions = await query(
+        `SELECT id, condition_name, icd10_code, category, status, diagnosed_date, severity, doctor, facility, notes
+         FROM patient_conditions
+         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         ORDER BY CASE WHEN status = 'ACTIVE' THEN 0 ELSE 1 END, diagnosed_date DESC NULLS LAST, id DESC;`,
+        [patientIds, patient.id]
+      );
+    } catch (e) {
+      console.warn("Could not query patient_conditions:", e);
+    }
+
+    let dbAllergies: any[] = [];
+    try {
+      dbAllergies = await query(
+        `SELECT id, allergen, category, reaction, severity, status, source, verification_status, added_date, notes
+         FROM patient_allergies
+         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         ORDER BY id DESC;`,
+        [patientIds, patient.id]
+      );
+    } catch (e) {
+      console.warn("Could not query patient_allergies:", e);
+    }
 
     // 5. Assemble and Return Complete Authorized Medical Dossier
     return NextResponse.json({
@@ -297,7 +436,7 @@ export async function GET(
         confirmedPrescriptionsCount: formattedDocuments.filter((d) => !d.isDraft).length,
         draftPrescriptionsCount: formattedDocuments.filter((d) => d.isDraft).length,
         activeMedicationsCount: activeMedicines.length,
-        totalObservationsCount: rawObs.length,
+        totalObservationsCount: combinedObs.length,
       },
       documents: formattedDocuments,
       medications: {
@@ -306,8 +445,10 @@ export async function GET(
         needsReview: reviewMedicines,
         total: medRows.length,
       },
-      observations: rawObs,
+      observations: combinedObs,
       longitudinalTrends: trends,
+      conditions: dbConditions,
+      allergies: dbAllergies,
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Server error occurred';

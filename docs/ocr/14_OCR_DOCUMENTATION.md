@@ -114,35 +114,41 @@ sequenceDiagram
     NextAPI->>PyBackend: POST /ocr (Headers: X-API-Key)
 
     PyBackend->>DB: Query SHA-256 hash & patient_id in raw_ocr
-    alt Duplicate SHA-256 Found
-        PyBackend-->>NextAPI: HTTP 409 Conflict (Duplicate upload rejected)
+    alt Existing non-discarded extraction found
+        PyBackend->>DB: Load extraction linked to matching raw OCR
+        PyBackend-->>NextAPI: Return existing extraction (duplicate=true)
+    else No extraction exists or prior draft was discarded
+        alt Matching raw OCR exists
+            PyBackend->>Preproc: Prepare re-uploaded image for Gemini retry
+            PyBackend->>Gemini: Reuse saved OCR lines and send re-uploaded image
+        else First upload
+            PyBackend->>Preproc: preprocess_image(data)
+            Note over Preproc: EXIF transpose -> RGB convert -> autocontrast(cutoff=1%) -> Resize(1000px..2048px)
+            Preproc-->>PyBackend: Saved file path in model/preprocessed/ & (width, height)
+
+            PyBackend->>OCR: run_ocr(path, size) [Protected by OCR_LOCK thread lock]
+            OCR-->>PyBackend: Raw boxes [{text, conf, x0, y0, x1, y1}]
+
+            PyBackend->>PyBackend: build_lines(raw_boxes, img_w, img_h)
+            Note over PyBackend: Clusters boxes by vertical center (cy) into visual rows & sorts left-to-right
+
+            PyBackend->>PyBackend: mask_pii(text)
+            Note over PyBackend: Replaces email addresses with [EMAIL] & phone numbers with [PHONE]
+
+            PyBackend->>DB: INSERT INTO raw_ocr (image_sha256, lines_json, avg_conf, ocr_engine)
+            DB-->>PyBackend: raw_ocr_id
+
+            PyBackend->>Gemini: call_gemini(lines, preprocessed_image_path)
+        end
+        Note over Gemini: Sends image bytes + OCR line tokens.<br/>Iterates MODEL_CANDIDATES list on 503/429/404 errors.
+        Gemini-->>PyBackend: Prescription Pydantic model object
+
+        PyBackend->>Val: analyze_prescription(rx_object, ocr_lines)
+        Note over Val: 1. Apply regex digit & schedule fixers<br/>2. Match medicine names against medicine_master (Exact / RapidFuzz near match)<br/>3. Range-check vitals (BP, Sugar, Pulse, Temp, SpO2, Weight)<br/>4. Compute min_conf & quality gate status
+
+        PyBackend->>DB: INSERT INTO extractions (raw_ocr_id, analysis_json, status='PENDING_USER_CONFIRMATION')
+        DB-->>PyBackend: extraction_id
     end
-
-    PyBackend->>Preproc: preprocess_image(data)
-    Note over Preproc: EXIF transpose -> RGB convert -> autocontrast(cutoff=1%) -> Resize(1000px..2048px)
-    Preproc-->>PyBackend: Saved file path in model/preprocessed/ & (width, height)
-
-    PyBackend->>OCR: run_ocr(path, size) [Protected by OCR_LOCK thread lock]
-    OCR-->>PyBackend: Raw boxes [{text, conf, x0, y0, x1, y1}]
-
-    PyBackend->>PyBackend: build_lines(raw_boxes, img_w, img_h)
-    Note over PyBackend: Clusters boxes by vertical center (cy) into visual rows & sorts left-to-right
-
-    PyBackend->>PyBackend: mask_pii(text)
-    Note over PyBackend: Replaces email addresses with [EMAIL] & phone numbers with [PHONE]
-
-    PyBackend->>DB: INSERT INTO raw_ocr (image_sha256, lines_json, avg_conf, ocr_engine)
-    DB-->>PyBackend: raw_ocr_id
-
-    PyBackend->>Gemini: call_gemini(lines, preprocessed_image_path)
-    Note over Gemini: Sends image bytes + OCR line tokens.<br/>Iterates MODEL_CANDIDATES list on 503/429/404 errors.
-    Gemini-->>PyBackend: Prescription Pydantic model object
-
-    PyBackend->>Val: analyze_prescription(rx_object, ocr_lines)
-    Note over Val: 1. Apply regex digit & schedule fixers<br/>2. Match medicine names against medicine_master (Exact / RapidFuzz near match)<br/>3. Range-check vitals (BP, Sugar, Pulse, Temp, SpO2, Weight)<br/>4. Compute min_conf & quality gate status
-
-    PyBackend->>DB: INSERT INTO extractions (raw_ocr_id, analysis_json, status='PENDING_USER_CONFIRMATION')
-    DB-->>PyBackend: extraction_id
 
     PyBackend-->>NextAPI: Return Extraction Payload JSON
     NextAPI-->>UI: Return HTTP 200 OK + extraction payload

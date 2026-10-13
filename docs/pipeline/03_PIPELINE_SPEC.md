@@ -243,6 +243,8 @@ Temperature: classified as `F` if value >= 90 else `C`; bounds checked according
 
 Raw OCR is committed to the `raw_ocr` table **before** calling the LLM. This ensures the source text is preserved even if all Gemini calls fail. Re-uploading an identical image reuses that row and resumes structuring; per-record locking prevents concurrent retries from creating duplicate extractions. A completed extraction is returned idempotently. The user can also retry via `POST /structure/{ocr_id}`.
 
+When the same image is uploaded again for the same patient, `process_image()` checks for an existing extraction linked to that raw OCR row. It returns the existing non-discarded extraction when present. If no usable extraction exists, it reuses the stored OCR lines and passes the re-uploaded image to Gemini, preserving image-grounded structuring after a network or model failure. The Next.js upload route updates the existing document for that extraction instead of inserting another timeline document.
+
 ---
 
 ## Stage 8 — Draft Extraction Storage

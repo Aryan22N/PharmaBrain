@@ -22,6 +22,9 @@ services:
     volumes:
       - paddlex-cache:/root/.paddlex
       - db-data:/app/data
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -54,6 +57,9 @@ services:
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
 volumes:
   paddlex-cache:

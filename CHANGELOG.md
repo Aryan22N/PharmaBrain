@@ -12,6 +12,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - 2026-10-13 — Fixed the prescription timeline migration to reference the quoted camelCase `Document."filePath"` column used by the application schema.
 - 2026-10-13 — Made prescription timeline confirmation idempotent with stable extraction/document references and a unique database index, merged document and event rows by prescription identity (preserving distinct same-date prescriptions), repaired mirrors on already-confirmed retries, and refreshed no-store timeline state on entry and after confirmation.
 - 2026-10-12 — Unconfirmed Prescription Review/Discard Lifecycle, Accurate Provenance Attribution, and UI Refinements:
+- 2026-10-13 — Fixed the patient timeline showing a confirmed prescription as a draft after save: confirmation refreshes the mounted dashboard before redirect, timeline entry refreshes again, and dashboard requests/responses disable caching.
+- 2026-10-13 — Made prescription uploads recoverable after Gemini or network failures: identical re-uploads resume from saved OCR or return the existing draft, the upload UI retains the selected image for retry, and document persistence is idempotent by extraction ID.
+- 2026-10-13 — Patient trends now include explicitly verified prescription timeline events when legacy confirmations are missing their `confirmed_prescriptions` or `CONFIRMED` document mirror, fixing undercounted clinical date eligibility.
+- 2026-10-13 — Fixed patient trend record matching for legacy patient identifiers and serialized analysis JSON, linked observations to documents by extraction ID as well as document ID, and removed patient-identifying values from trend logs.
+
+- 2026-10-12 — Step 4: Doctor Dashboard Real Backend Integration & Resilient States:
+  - **Real Backend Data Integration**:
+    - Connected `/doctor/dashboard` to authenticated doctor identity (`GET /api/auth/me`), permanent doctor identifier (`D-XXXXXXXXX`), and live consultation access requests (`GET /api/doctor/access-requests`).
+    - Added real-time computed practice KPI metric cards (Active Consultations, Pending Authorizations, Total Directory Queries) dynamically calculated from verified Supabase records without mock or hardcoded statistics.
+  - **Robust State Handling & Resilience**:
+    - Implemented dedicated session error state screen with Retry button on `/doctor/dashboard` to handle temporary network or server failures gracefully.
+    - Implemented `requestsError` state banner with in-place Retry action in the access requests table.
+    - Added in-place Retry action for directory search error states.
+    - Separated `403 Forbidden` (clinical consent locked), `404 Not Found`, and `>= 500` (server/network failure) in `/doctor/patients/[patientId]` with in-page retry without requiring browser reload.
+  - **Security & TLS Verification**:
+    - Enforced full TLS certificate validation (`rejectUnauthorized: true` with official Supabase Root & Intermediate CA bundle) in `frontend/lib/db.ts`.
+    - Verified strict server-side RBAC and IDOR protection across 10 security test scenarios and 12 full regression audit checks (100% pass rate).
   - **Prescription Draft Discard & Review Flow**:
     - Added top alert notification and inline draft callout cards on `/patient/timeline` for unconfirmed OCR prescriptions (`Prescription Scan (Draft)`, `Awaiting Review`, `Unsaved Draft`).
     - Implemented **"Discard Draft"** and **"Review & Submit"** actions allowing patients to discard abandoned drafts or navigate to complete confirmation.

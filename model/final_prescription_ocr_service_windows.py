@@ -1170,11 +1170,17 @@ def _structure_from_raw_locked(raw_id, expected_name=None, image_path=None):
             .limit(1)
         ).mappings().first()
     if existing:
-        log_stage("STRUCTURING_REUSED", f"Returning existing extraction #{existing['id']} for raw_ocr_id={raw_id}")
-        return _payload(
-            existing["id"], raw_id, existing["status"],
-            json.loads(existing["analysis_json"]), existing["llm_model"], duplicate=True,
-        )
+        try:
+            analysis = json.loads(existing["analysis_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            analysis = {}
+        if isinstance(analysis, dict) and isinstance(analysis.get("record"), dict):
+            log_stage("STRUCTURING_REUSED", f"Returning existing extraction #{existing['id']} for raw_ocr_id={raw_id}")
+            return _payload(
+                existing["id"], raw_id, existing["status"],
+                analysis, existing["llm_model"], duplicate=True,
+            )
+        log_stage("STRUCTURING_RECOVERY", f"Existing extraction for raw_ocr_id={raw_id} has no structured record; retrying")
     lines = json.loads(row["lines_json"])
     by_id = {l["id"]: l for l in lines}
     log_stage("LLM_STRUCTURING", f"Invoking Google Gemini on {len(lines)} OCR lines...")
@@ -1215,6 +1221,8 @@ def process_image(data: bytes, filename: str, patient_id: str, expected_name: Op
         hit = c.execute(
             select(raw_ocr.c.id)
             .where(raw_ocr.c.image_sha256 == sha, raw_ocr.c.patient_id == patient_id)
+            .order_by(raw_ocr.c.id.desc())
+            .limit(1)
         ).first()
     if hit:
         raw_id = hit[0]

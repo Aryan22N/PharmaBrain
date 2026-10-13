@@ -128,7 +128,7 @@ flowchart TD
 | Gemini model unavailable (429/503/404) | `call_gemini()` catches exception, checks error code | Fast-fail to next candidate in `MODEL_CANDIDATES`; HTTP 502 if all fail |
 | No text found in image | `build_lines()` returns empty list | HTTP 422 with message asking user to re-upload clearer photo |
 | DB connection lost | `pool_pre_ping=True`; `pool_recycle=180` | SQLAlchemy reconnects; if unavailable at startup, `RuntimeError` raised |
-| Duplicate prescription upload | `process_image()` checks SHA-256 hash per patient | Returns existing extraction with `duplicate=true` flag |
+| Duplicate prescription upload | `process_image()` checks SHA-256 hash per patient | Returns a prior non-discarded extraction; if only raw OCR exists, retries structuring from saved OCR and the re-uploaded image |
 | Image too large | `len(data) > MAX_UPLOAD_MB * 1024 * 1024` | HTTP 413 |
 | Wrong file type | MIME type check in `api_ocr()` | HTTP 415 |
 | Confirmation of already-confirmed extraction | `ex["status"] == "CONFIRMED"` check in `api_confirm()` | HTTP 409 unless `allow_duplicate=true` |

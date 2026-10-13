@@ -156,6 +156,8 @@ The clinical encounter date is extracted strictly in hierarchical order:
 
 Every candidate date must pass strict ISO-8601 validation (`/^\d{4}-\d{2}-\d{2}$/` and `!isNaN(Date.parse(date))`). Invalidly dated records are excluded from eligibility counting.
 
+Document eligibility lookup includes the authenticated user's current and legacy patient identifiers. Structured analysis results are parsed whether the database driver returns JSON objects or serialized JSON. Explicitly verified prescription timeline events (`Prescription Verified` with an `HMS-RX-` reference) are also included when older confirmed records have no matching `confirmed_prescriptions` or `CONFIRMED` document row. Observation provenance resolves both document IDs and extraction IDs, including extraction references stored in the document path or structured result.
+
 ### 4.3 Database Mirror Unification & Deduplication
 Prescriptions confirmed via the web portal or Python API generate entries across both `"Document"` and `confirmed_prescriptions`. To prevent double-counting:
 - **Mirror Unification:** Records sharing the same `extraction_id` (via `d.filePath = '/extractions/{id}'` or `sr.reference_id`) are unified into a single clinical encounter.
