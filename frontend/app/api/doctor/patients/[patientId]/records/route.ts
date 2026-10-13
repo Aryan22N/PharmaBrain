@@ -27,7 +27,7 @@ export async function GET(
       return NextResponse.json({ error: 'Patient ID is required.' }, { status: 400 });
     }
 
-    const normalizedId = rawPatientId.trim().toUpperCase();
+    const normalizedId = decodeURIComponent(rawPatientId).trim().replace(/\s+/g, '-').toUpperCase();
 
     // 2. Fetch Patient Account from Database
     const patientRows = await query<{
@@ -43,6 +43,7 @@ export async function GET(
        FROM "User"
        WHERE role = 'PATIENT' AND (
          UPPER("patientId") = $1 OR
+         UPPER(REPLACE(COALESCE("patientId", ''), ' ', '-')) = $1 OR
          UPPER(COALESCE("legacyPatientId", '')) = $1
        )
        LIMIT 1;`,
@@ -143,6 +144,30 @@ export async function GET(
       const isConfirmed = doc.status === 'CONFIRMED';
       const sr = (doc.structuredResult || {}) as Record<string, unknown>;
 
+      let docName = 'Attending Physician';
+      let docRegNo: string | null = null;
+      if (typeof sr.doctor === 'string' && sr.doctor.trim()) {
+        docName = sr.doctor.trim();
+      } else if (typeof sr.doctor === 'object' && sr.doctor !== null) {
+        const dObj = sr.doctor as { name?: string; reg_no?: string };
+        if (dObj.name && typeof dObj.name === 'string') {
+          docName = dObj.name.trim();
+        }
+        if (dObj.reg_no && typeof dObj.reg_no === 'string') {
+          docRegNo = dObj.reg_no.trim();
+        }
+      }
+
+      let hospName = 'Medical Facility';
+      if (typeof sr.hospital === 'string' && sr.hospital.trim()) {
+        hospName = sr.hospital.trim();
+      } else if (typeof sr.hospital === 'object' && sr.hospital !== null) {
+        const hObj = sr.hospital as { name?: string };
+        if (hObj.name && typeof hObj.name === 'string') {
+          hospName = hObj.name.trim();
+        }
+      }
+
       return {
         id: doc.id,
         originalName: doc.originalName,
@@ -153,8 +178,9 @@ export async function GET(
         uploadedAt: doc.uploadedAt,
         summary: doc.summary,
         structuredResult: {
-          doctor: sr.doctor || 'Attending Physician',
-          hospital: sr.hospital || 'Medical Facility',
+          doctor: docName,
+          doctor_reg_no: docRegNo,
+          hospital: hospName,
           dateIso: sr.date_iso || null,
           medicines: sr.medicines || [],
           vitals: sr.vitals || [],
@@ -210,9 +236,32 @@ export async function GET(
       [patientIds, patient.id]
     );
 
-    const activeMedicines = medRows.filter((m) => m.status === 'ACTIVE');
-    const historyMedicines = medRows.filter((m) => m.status === 'COMPLETED' || m.status === 'DISCONTINUED');
-    const reviewMedicines = medRows.filter(
+    const sanitizedMedRows = medRows.map((m) => {
+      let doctorStr = 'Attending';
+      if (typeof m.doctor === 'string') {
+        const trimmed = m.doctor.trim();
+        if (trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            doctorStr = parsed.name || trimmed;
+          } catch {
+            doctorStr = trimmed;
+          }
+        } else if (trimmed) {
+          doctorStr = trimmed;
+        }
+      } else if (typeof m.doctor === 'object' && m.doctor !== null) {
+        doctorStr = (m.doctor as { name?: string }).name || 'Attending';
+      }
+      return {
+        ...m,
+        doctor: doctorStr,
+      };
+    });
+
+    const activeMedicines = sanitizedMedRows.filter((m) => m.status === 'ACTIVE');
+    const historyMedicines = sanitizedMedRows.filter((m) => m.status === 'COMPLETED' || m.status === 'DISCONTINUED');
+    const reviewMedicines = sanitizedMedRows.filter(
       (m) =>
         Boolean(m.is_conflicting) ||
         (m.reconciliation_category &&

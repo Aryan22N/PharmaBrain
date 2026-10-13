@@ -8,6 +8,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-13 — Patient trends now include explicitly verified prescription timeline events when legacy confirmations are missing their `confirmed_prescriptions` or `CONFIRMED` document mirror, fixing undercounted clinical date eligibility.
+- 2026-10-13 — Fixed patient trend record matching for legacy patient identifiers and serialized analysis JSON, linked observations to documents by extraction ID as well as document ID, and removed patient-identifying values from trend logs.
+
 - 2026-10-12 — Step 4: Doctor Dashboard Real Backend Integration & Resilient States:
   - **Real Backend Data Integration**:
     - Connected `/doctor/dashboard` to authenticated doctor identity (`GET /api/auth/me`), permanent doctor identifier (`D-XXXXXXXXX`), and live consultation access requests (`GET /api/doctor/access-requests`).

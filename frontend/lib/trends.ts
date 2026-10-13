@@ -682,8 +682,21 @@ export function calculatePatientTrends(
   for (const doc of documents) {
     const pId = doc.id;
     docLookup.set(pId, doc);
-    if (doc.structuredResult?.reference_id) {
-      docLookup.set(doc.structuredResult.reference_id, doc);
+    let structuredResult = doc.structuredResult;
+    if (typeof structuredResult === "string") {
+      try { structuredResult = JSON.parse(structuredResult); } catch { structuredResult = {}; }
+    }
+    const referenceId = structuredResult?.reference_id;
+    if (referenceId !== undefined && referenceId !== null) {
+      docLookup.set(referenceId, doc);
+      const numericReferenceId = Number(referenceId);
+      if (Number.isSafeInteger(numericReferenceId)) docLookup.set(numericReferenceId, doc);
+    }
+    const filePathMatch = typeof doc.filePath === "string"
+      ? doc.filePath.match(/\/extractions\/(\d+)/)
+      : null;
+    if (filePathMatch) {
+      docLookup.set(Number(filePathMatch[1]), doc);
     }
   }
 

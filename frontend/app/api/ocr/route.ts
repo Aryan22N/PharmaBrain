@@ -56,39 +56,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Duplicate Guard: Check SHA256 & file duplicates before running OCR engine
+    // The OCR service owns exact-image deduplication because it can distinguish an
+    // existing draft from raw OCR that needs recovery. Filename matching here blocked
+    // retries after a failed Gemini call and also rejected different files with the
+    // same filename.
     const fileBytes = Buffer.from(await file.arrayBuffer());
-    const crypto = await import("crypto");
-    const fileSha256 = crypto.createHash("sha256").update(fileBytes).digest("hex");
-
-    try {
-      const { query } = await import("@/lib/db");
-      const existingDoc = await query(
-        `SELECT id, "originalName" FROM "Document"
-         WHERE ("userId" = $1 OR "patientId" = $2)
-           AND status != 'DISCARDED'
-           AND ("storedFilename" LIKE $3 OR "originalName" = $4)
-         LIMIT 1;`,
-        [userId, effectivePatientId, `%${fileSha256.slice(0, 16)}%`, file.name]
-      );
-
-      if (existingDoc.length > 0) {
-        console.warn(`[API/OCR] Duplicate prescription detected for patient ${effectivePatientId}. Upload discarded.`);
-        return NextResponse.json(
-          {
-            error: `Duplicate prescription upload detected. This exact image (${file.name}) has already been uploaded for patient #${effectivePatientId}. The duplicate upload was automatically discarded without running OCR to prevent redundant records.`,
-            duplicate_discarded: true,
-          },
-          { status: 409 }
-        );
-      }
-    } catch (dbCheckErr) {
-      console.warn("Pre-upload DB duplicate check error:", dbCheckErr);
-    }
 
     // Prepare outbound multipart form data for Python FastAPI
     const startTime = Date.now();
-    console.log(`[${new Date().toISOString()}] [API/OCR] Processing prescription (size=${file.size} bytes, type=${file.type}, filename=${file.name}, patientId=${effectivePatientId}, sha256=${fileSha256.slice(0, 12)})`);
+    console.log(`[${new Date().toISOString()}] [API/OCR] Processing prescription image (size=${file.size} bytes, type=${file.type})`);
 
     const backendFormData = new FormData();
     const uploadBlob = new Blob([fileBytes], { type: file.type });
@@ -120,9 +96,38 @@ export async function POST(req: NextRequest) {
 
     console.log(`[${new Date().toISOString()}] [API/OCR] Pipeline completed successfully in ${elapsedMs}ms`);
 
-    // Save uploaded image to Supabase Storage Bucket (with local fallback if unconfigured)
-    let publicImageUrl = "/sample_prescription.png";
+    const extractionData = result.data as any;
+    const extractionId = extractionData?.extraction_id;
+    const rec = extractionData?.record || {};
+    if (!extractionId) {
+      return NextResponse.json(
+        { error: "The OCR service returned no extraction ID. Retry this image to recover the saved processing attempt." },
+        { status: 502 }
+      );
+    }
+
+    const { query } = await import("@/lib/db");
+    const extractionPath = `/extractions/${extractionId}`;
+    let existingDoc: any = null;
     try {
+      const existingRows = await query(
+        `SELECT id, "storedFilename", status
+         FROM "Document"
+         WHERE "userId" = $1 AND "patientId" = $2 AND "filePath" = $3
+         ORDER BY id DESC
+         LIMIT 1;`,
+        [userId, effectivePatientId, extractionPath]
+      );
+      existingDoc = existingRows[0] || null;
+    } catch (lookupErr) {
+      console.warn("Could not check for an existing document for this extraction:", lookupErr);
+    }
+
+    // Avoid uploading the same image again when this request recovered an existing draft.
+    let publicImageUrl = "/sample_prescription.png";
+    if (existingDoc?.storedFilename && existingDoc.storedFilename !== "/sample_prescription.png") {
+      publicImageUrl = existingDoc.storedFilename;
+    } else try {
       const { uploadPrescriptionImageToSupabase } = await import("@/lib/supabaseStorage");
       const storageRes = await uploadPrescriptionImageToSupabase(
         fileBytes,
@@ -151,12 +156,9 @@ export async function POST(req: NextRequest) {
       console.warn("Could not save image to Supabase bucket or public/uploads:", saveErr);
     }
 
-    // Immediately save to Patient Summary as NOT CONFIRMED so it appears in the dashboard
+    // Upsert the patient document by extraction path so a recovered/retried response
+    // cannot create duplicate timeline documents.
     try {
-      const { query } = await import("@/lib/db");
-      const extractionData = result.data as any;
-      const extractionId = extractionData?.extraction_id;
-      const rec = extractionData?.record || {};
       rec.image_url = publicImageUrl;
       const hospitalName = rec.hospital || file.name.replace(/\.[^/.]+$/, "");
       const dateIso = rec.date_iso || new Date().toISOString().slice(0, 10);
@@ -165,19 +167,43 @@ export async function POST(req: NextRequest) {
       const doctorStr = typeof rec.doctor === "string" ? rec.doctor : rec.doctor?.name || "Dr. Unverified";
       const docSummary = `${hospitalName} (${doctorStr}). Extracted ${medCount} therapies. Status: NOT CONFIRMED (Awaiting Clinician Review).`;
 
-      const docRows = await query(
-        `INSERT INTO "Document" ("userId", "patientId", "originalName", "storedFilename", "documentType", "mimeType", "filePath", status, "uploadedAt")
-         VALUES ($1, $2, $3, $4, 'PRESCRIPTION', $5, $6, 'NOT CONFIRMED', $7)
-         RETURNING id;`,
-        [userId, effectivePatientId, docName, publicImageUrl, file.type, `/extractions/${extractionId}`, new Date().toISOString()]
-      );
-
-      if (docRows.length > 0) {
+      let documentId: number | null = existingDoc?.id ?? null;
+      if (documentId) {
         await query(
-          `INSERT INTO "Analysis" ("documentId", summary, "structuredResult", "isDemo", "createdAt")
-           VALUES ($1, $2, $3, false, $4);`,
-          [docRows[0].id, docSummary, JSON.stringify(rec), new Date().toISOString()]
+          `UPDATE "Document"
+           SET "originalName" = $1,
+               "storedFilename" = CASE WHEN $2 = '/sample_prescription.png' THEN "storedFilename" ELSE $2 END,
+               status = CASE WHEN status = 'CONFIRMED' THEN status ELSE 'NOT CONFIRMED' END
+           WHERE id = $3 AND "userId" = $4 AND "patientId" = $5;`,
+          [docName, publicImageUrl, documentId, userId, effectivePatientId]
         );
+      } else {
+        const docRows = await query(
+          `INSERT INTO "Document" ("userId", "patientId", "originalName", "storedFilename", "documentType", "mimeType", "filePath", status, "uploadedAt")
+           VALUES ($1, $2, $3, $4, 'PRESCRIPTION', $5, $6, 'NOT CONFIRMED', $7)
+           RETURNING id;`,
+          [userId, effectivePatientId, docName, publicImageUrl, file.type, extractionPath, new Date().toISOString()]
+        );
+        documentId = docRows[0]?.id ?? null;
+      }
+
+      if (documentId) {
+        const analysisRows = await query(
+          `SELECT id FROM "Analysis" WHERE "documentId" = $1 ORDER BY id DESC LIMIT 1;`,
+          [documentId]
+        );
+        if (analysisRows.length > 0) {
+          await query(
+            `UPDATE "Analysis" SET summary = $1, "structuredResult" = $2 WHERE id = $3;`,
+            [docSummary, JSON.stringify(rec), analysisRows[0].id]
+          );
+        } else {
+          await query(
+            `INSERT INTO "Analysis" ("documentId", summary, "structuredResult", "isDemo", "createdAt")
+             VALUES ($1, $2, $3, false, $4);`,
+            [documentId, docSummary, JSON.stringify(rec), new Date().toISOString()]
+          );
+        }
       }
     } catch (dbErr) {
       console.warn("Could not save initial NOT CONFIRMED document to DB:", dbErr);

@@ -75,6 +75,7 @@ export default function UploadPage() {
 
   const handleFileSelect = (file: File) => {
     setErrorMessage(null);
+    setRawOcrId(undefined);
 
     if (!ALLOWED_MIME_TYPES.includes(file.type) && !file.name.match(/\.(jpg|jpeg|png|webp)$/i)) {
       setErrorMessage(`Unsupported format (${file.type || "unknown"}). Please upload a JPEG, PNG, or WebP image.`);
@@ -88,6 +89,7 @@ export default function UploadPage() {
       return;
     }
 
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setSelectedFile(file);
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
@@ -121,6 +123,7 @@ export default function UploadPage() {
       fileInputRef.current.value = "";
     }
     setErrorMessage(null);
+    setRawOcrId(undefined);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -167,21 +170,6 @@ export default function UploadPage() {
       if (err.rawOcrId) {
         setRawOcrId(err.rawOcrId);
       }
-    }
-  };
-
-  const handleRetryStructuring = async () => {
-    if (!rawOcrId) return;
-    setStep("structuring");
-    setErrorMessage(null);
-
-    try {
-      const result = await clientApi.retryStructure(rawOcrId, patientName || undefined);
-      setStep("success");
-      router.push(`/patient/documents/${result.extraction_id}`);
-    } catch (err: any) {
-      setStep("error");
-      setErrorMessage(err.message || "Retry structuring failed.");
     }
   };
 
@@ -443,15 +431,11 @@ export default function UploadPage() {
                 <div className="leading-relaxed">{errorMessage}</div>
                 <div className="pt-1 flex flex-wrap items-center gap-2">
                   <button
-                    type="button"
-                    onClick={() => {
-                      setErrorMessage(null);
-                      setStep("idle");
-                      setElapsedSeconds(0);
-                    }}
+                    type="submit"
+                    disabled={!selectedFile || isProcessing}
                     className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 font-semibold text-xs hover:bg-slate-50 cursor-pointer"
                   >
-                    Try Again
+                    Retry with selected image
                   </button>
                   <button
                     type="button"
@@ -461,13 +445,9 @@ export default function UploadPage() {
                     Check Patient Dashboard
                   </button>
                   {rawOcrId && (
-                    <button
-                      type="button"
-                      onClick={handleRetryStructuring}
-                      className="px-3 py-1.5 rounded-lg bg-rose-100 text-rose-800 font-semibold text-xs cursor-pointer"
-                    >
-                      Retry Gemini Structuring (OCR #{rawOcrId})
-                    </button>
+                    <span className="text-[11px] text-slate-600">
+                      Saved OCR is available; retrying will reuse it and send this image for structuring.
+                    </span>
                   )}
                 </div>
               </div>

@@ -1174,17 +1174,50 @@ def structure_from_raw(raw_id, expected_name=None, image_path=None):
 def process_image(data: bytes, filename: str, patient_id: str, expected_name: Optional[str] = None):
     t_pipeline_start = time.time()
     sha = hashlib.sha256(data).hexdigest()
-    log_stage("UPLOAD_RECEIVED", f"Processing upload: filename='{filename}', size={len(data)} bytes, sha256={sha[:12]}...")
+    log_stage("UPLOAD_RECEIVED", f"Processing image upload (size={len(data)} bytes)")
 
-    # Duplicate Upload Guard: Check if identical image has already been uploaded for this patient
+    # Idempotently recover an identical upload instead of rejecting it. The raw OCR row is
+    # committed before Gemini runs, so a duplicate may be a recoverable failed attempt.
     with engine.connect() as c:
         hit = c.execute(
             select(raw_ocr.c.id)
             .where(raw_ocr.c.image_sha256 == sha, raw_ocr.c.patient_id == patient_id)
+            .order_by(raw_ocr.c.id.desc())
+            .limit(1)
         ).first()
     if hit:
-        log_stage("DUPLICATE_DISCARDED", f"Duplicate image upload detected for patient {patient_id} (sha256={sha[:12]}). OCR service skipped and upload discarded.", time.time() - t_pipeline_start)
-        raise PipelineError(f"Duplicate prescription image detected. This exact prescription has already been uploaded for patient #{patient_id}. The duplicate upload was automatically discarded without running OCR to prevent redundant records.", http=409)
+        raw_id = hit[0]
+        with engine.connect() as c:
+            existing = c.execute(
+                select(extractions)
+                .where(extractions.c.raw_ocr_id == raw_id)
+                .order_by(extractions.c.id.desc())
+                .limit(1)
+            ).mappings().first()
+
+        if existing and existing["status"] != "DISCARDED":
+            analysis = json.loads(existing["analysis_json"] or "{}")
+            log_stage("DUPLICATE_RECOVERED", f"Returning existing extraction #{existing['id']} for raw OCR #{raw_id}", time.time() - t_pipeline_start)
+            return _payload(
+                existing["id"], raw_id, existing["status"], analysis,
+                existing["llm_model"], duplicate=True,
+            )
+
+        # No reviewable draft exists yet (or the prior draft was discarded). Reuse its OCR
+        # lines, but provide this uploaded image to Gemini so image-grounded transcription
+        # remains enabled on retry.
+        t_prep = time.time()
+        try:
+            image_path, _ = preprocess_image(data)
+            log_stage("PREPROCESSING", "Prepared image for retrying prescription structuring", time.time() - t_prep)
+        except Exception as e:
+            log_stage("ERROR", f"Image preprocessing failed during retry: {e}", time.time() - t_prep)
+            raise PipelineError(f"not a readable image: {e}", http=400)
+
+        log_stage("DUPLICATE_RECOVERY", f"Retrying structuring from saved raw OCR #{raw_id}", time.time() - t_pipeline_start)
+        result = structure_from_raw(raw_id, expected_name, image_path)
+        result["duplicate"] = True
+        return result
 
     t_prep = time.time()
     try:

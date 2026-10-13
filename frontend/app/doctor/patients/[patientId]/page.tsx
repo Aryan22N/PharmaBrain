@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, use } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -67,11 +67,54 @@ interface DocStructuredMedicine {
 }
 
 interface DocStructuredResult {
-  hospital?: string | null;
-  doctor?: string | null;
+  hospital?: unknown;
+  doctor?: unknown;
+  doctor_reg_no?: string | null;
   dateIso?: string | null;
   medicines?: DocStructuredMedicine[];
   [key: string]: unknown;
+}
+
+function formatDoctorName(docField: unknown): string {
+  if (!docField) return "Attending Physician";
+  if (typeof docField === "string") {
+    if (docField.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(docField);
+        return parsed?.name ? (parsed.reg_no ? `${parsed.name} (${parsed.reg_no})` : parsed.name) : docField;
+      } catch {
+        return docField;
+      }
+    }
+    return docField;
+  }
+  if (typeof docField === "object" && docField !== null) {
+    const d = docField as { name?: string; reg_no?: string };
+    if (d.name) {
+      return d.reg_no ? `${d.name} (${d.reg_no})` : d.name;
+    }
+  }
+  return String(docField || "Attending Physician");
+}
+
+function formatHospitalName(hospField: unknown): string {
+  if (!hospField) return "Medical Facility";
+  if (typeof hospField === "string") {
+    if (hospField.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(hospField);
+        return parsed?.name || hospField;
+      } catch {
+        return hospField;
+      }
+    }
+    return hospField;
+  }
+  if (typeof hospField === "object" && hospField !== null) {
+    const h = hospField as { name?: string };
+    if (h.name) return h.name;
+  }
+  return String(hospField || "Medical Facility");
 }
 
 interface DocumentItem {
@@ -382,13 +425,27 @@ function DualBpSparkline({
   );
 }
 
-export default function DoctorPatientRecordPage({
-  params,
-}: {
-  params: Promise<{ patientId: string }>;
-}) {
+export default function DoctorPatientRecordPage() {
   const router = useRouter();
-  const { patientId: rawPatientId } = use(params);
+  const routeParams = useParams();
+
+  const rawParam = routeParams?.patientId;
+  const paramPatientId = Array.isArray(rawParam)
+    ? rawParam[0]
+    : typeof rawParam === "string"
+    ? rawParam
+    : "";
+
+  const cleanPatientId = React.useMemo(() => {
+    try {
+      return decodeURIComponent(paramPatientId || "")
+        .trim()
+        .replace(/\s+/g, "-")
+        .toUpperCase();
+    } catch {
+      return (paramPatientId || "").trim().replace(/\s+/g, "-").toUpperCase();
+    }
+  }, [paramPatientId]);
 
   const [loading, setLoading] = useState(true);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
@@ -407,18 +464,29 @@ export default function DoctorPatientRecordPage({
   const [selectedDiscrepancy, setSelectedDiscrepancy] = useState<MedicationItem | null>(null);
 
   const loadDossier = React.useCallback(async () => {
+    if (!cleanPatientId) {
+      setLoading(false);
+      setErrorStatus(400);
+      setErrorMessage("Patient ID is required.");
+      return;
+    }
+
     setLoading(true);
     setErrorStatus(null);
     setErrorMessage(null);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-      const res = await fetch(`/api/doctor/patients/${rawPatientId}/records`, {
+      const res = await fetch(`/api/doctor/patients/${encodeURIComponent(cleanPatientId)}/records`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (res.status === 401) {
+          router.replace(`/auth/doctor/login?redirect=/doctor/patients/${encodeURIComponent(cleanPatientId)}`);
+          return;
+        }
         setErrorStatus(res.status);
         setErrorMessage(data.error || "Failed to load patient medical records.");
         return;
@@ -431,7 +499,7 @@ export default function DoctorPatientRecordPage({
     } finally {
       setLoading(false);
     }
-  }, [rawPatientId]);
+  }, [cleanPatientId, router]);
 
   useEffect(() => {
     void loadDossier();
@@ -444,7 +512,7 @@ export default function DoctorPatientRecordPage({
         <h2 className="text-lg font-bold text-[#0F172A]">Verifying Patient Authorization...</h2>
         <p className="text-sm text-[#64748B] mt-1">
           Validating database consent keys and decrypting clinical records for ID:{" "}
-          <span className="font-mono font-bold text-[#0F172A]">{rawPatientId}</span>
+          <span className="font-mono font-bold text-[#0F172A]">{cleanPatientId || paramPatientId}</span>
         </p>
       </div>
     );
@@ -471,7 +539,7 @@ export default function DoctorPatientRecordPage({
 
           <div className="p-4 bg-[#F7F9FB] rounded-xl border border-[#DCE4ED] text-left text-xs space-y-1.5 text-[#475569] font-mono">
             <div>
-              Patient ID: <strong className="text-[#0F172A]">{rawPatientId}</strong>
+              Patient ID: <strong className="text-[#0F172A]">{cleanPatientId || paramPatientId}</strong>
             </div>
             <div>Status: <span className="text-[#DC2626] font-bold">LOCKED_CONSENT_UNCONFIRMED</span></div>
             <div className="text-[11px] text-[#64748B] font-sans">
@@ -508,7 +576,7 @@ export default function DoctorPatientRecordPage({
           <div>
             <h1 className="text-lg font-bold text-[#0F172A]">Patient Record Not Found</h1>
             <p className="text-xs text-[#64748B] mt-1">
-              No patient with identifier &ldquo;{rawPatientId}&rdquo; was found in the hospital registry.
+              No patient with identifier &ldquo;{cleanPatientId || paramPatientId}&rdquo; was found in the hospital registry.
             </p>
           </div>
           <button
@@ -555,74 +623,99 @@ export default function DoctorPatientRecordPage({
   }
 
   const {
-    patient,
-    medicalSummary,
-    documents,
-    medications,
-    observations,
-    longitudinalTrends,
-    authorization,
-    conditions: dbConditions,
-    allergies: dbAllergies,
+    patient = { id: 0, name: "Patient", email: "", patientId: cleanPatientId, accountRegisteredAt: "" },
+    medicalSummary = { totalDocuments: 0, confirmedPrescriptionsCount: 0, draftPrescriptionsCount: 0, activeMedicationsCount: 0, totalObservationsCount: 0 },
+    documents = [],
+    medications = { active: [], history: [], needsReview: [], total: 0 },
+    observations = [],
+    longitudinalTrends = null,
+    authorization = { status: "APPROVED", authorizedDoctor: "Doctor", doctorCode: "", approvedAt: "", auditNote: "" },
+    conditions: dbConditions = [],
+    allergies: dbAllergies = [],
   } = dossier;
 
+  // Safe collections
+  const safeMedications = {
+    active: Array.isArray(medications?.active) ? medications.active : [],
+    history: Array.isArray(medications?.history) ? medications.history : [],
+    needsReview: Array.isArray(medications?.needsReview) ? medications.needsReview : [],
+    total: typeof medications?.total === "number" ? medications.total : 0,
+  };
+  const safeObs = Array.isArray(observations) ? observations : [];
+  const safeDocs = Array.isArray(documents) ? documents : [];
+
   // Derive patient metadata
-  const basicInfo = patient.onboardingInfo?.basic_info || {};
+  const basicInfo = patient?.onboardingInfo?.basic_info || {};
   const patientAge = basicInfo.age ? `${basicInfo.age} y/o` : "Adult";
   const patientGender = basicInfo.gender ? String(basicInfo.gender) : "Patient";
   const patientDob = basicInfo.dob ? String(basicInfo.dob) : null;
-  const conditionsList = Array.isArray(patient.onboardingInfo?.conditions)
+  const conditionsList = Array.isArray(patient?.onboardingInfo?.conditions)
     ? (patient.onboardingInfo?.conditions as string[])
     : [];
-  const customConditionsList = Array.isArray(patient.onboardingInfo?.custom_conditions)
+  const customConditionsList = Array.isArray(patient?.onboardingInfo?.custom_conditions)
     ? (patient.onboardingInfo?.custom_conditions as string[])
     : [];
-  const dbCondNames = (dbConditions || []).map((c: any) => c.condition_name).filter(Boolean);
+  const dbCondNames = (dbConditions || []).map((c: any) => c?.condition_name).filter(Boolean);
   const allConditions = Array.from(new Set([...dbCondNames, ...conditionsList, ...customConditionsList]));
 
-  const dbAllergyNames = (dbAllergies || []).map((a: any) => a.allergen).filter(Boolean);
+  const dbAllergyNames = (dbAllergies || []).map((a: any) => a?.allergen).filter(Boolean);
   const patientAllergies =
     dbAllergyNames.length > 0
       ? dbAllergyNames.join(", ")
-      : patient.onboardingInfo?.history?.allergies || null;
+      : patient?.onboardingInfo?.history?.allergies || null;
 
   // Derive latest vitals measurements directly from database observations
-  const bpObs = observations.filter((o) => o.kind === "bp" || o.kind === "blood_pressure");
+  const bpObs = safeObs.filter((o) => o && (o.kind === "bp" || o.kind === "blood_pressure"));
   const latestBp = bpObs[bpObs.length - 1] || null;
 
-  const glucoseObs = observations.filter(
+  const glucoseObs = safeObs.filter(
     (o) =>
-      o.kind === "glucose" ||
-      o.kind === "sugar_fasting" ||
-      o.kind === "sugar_random" ||
-      o.kind === "sugar_post_meal" ||
-      o.kind.includes("glucose") ||
-      o.kind.includes("sugar")
+      o &&
+      typeof o.kind === "string" &&
+      (o.kind === "glucose" ||
+        o.kind === "sugar_fasting" ||
+        o.kind === "sugar_random" ||
+        o.kind === "sugar_post_meal" ||
+        o.kind.includes("glucose") ||
+        o.kind.includes("sugar"))
   );
   const latestGlucose = glucoseObs[glucoseObs.length - 1] || null;
 
-  const hba1cObs = observations.filter(
-    (o) => o.kind === "hba1c" || o.kind.includes("hba1c") || o.kind.includes("a1c")
+  const hba1cObs = safeObs.filter(
+    (o) =>
+      o &&
+      typeof o.kind === "string" &&
+      (o.kind === "hba1c" || o.kind.includes("hba1c") || o.kind.includes("a1c"))
   );
   const latestHba1c = hba1cObs[hba1cObs.length - 1] || null;
 
-  const hrObs = observations.filter(
-    (o) => o.kind === "heart_rate" || o.kind === "pulse" || o.kind === "hr" || o.kind === "pr"
+  const hrObs = safeObs.filter(
+    (o) =>
+      o &&
+      typeof o.kind === "string" &&
+      (o.kind === "heart_rate" || o.kind === "pulse" || o.kind === "hr" || o.kind === "pr")
   );
   const latestHr = hrObs[hrObs.length - 1] || null;
 
-  const spo2Obs = observations.filter(
-    (o) => o.kind === "spo2" || o.kind.includes("spo2") || o.kind.includes("oxygen") || o.kind.includes("o2")
+  const spo2Obs = safeObs.filter(
+    (o) =>
+      o &&
+      typeof o.kind === "string" &&
+      (o.kind === "spo2" || o.kind.includes("spo2") || o.kind.includes("oxygen") || o.kind.includes("o2"))
   );
   const latestSpo2 = spo2Obs[spo2Obs.length - 1] || null;
 
-  const weightObs = observations.filter((o) => o.kind === "weight" || o.kind === "wt");
+  const weightObs = safeObs.filter(
+    (o) => o && typeof o.kind === "string" && (o.kind === "weight" || o.kind === "wt")
+  );
   const latestWeight = weightObs[weightObs.length - 1] || null;
 
-  const bmiObs = observations.filter((o) => o.kind === "bmi");
+  const bmiObs = safeObs.filter((o) => o && o.kind === "bmi");
   const latestBmi = bmiObs[bmiObs.length - 1] || null;
 
-  const creatinineObs = observations.filter((o) => o.kind.includes("creatinine"));
+  const creatinineObs = safeObs.filter(
+    (o) => o && typeof o.kind === "string" && o.kind.includes("creatinine")
+  );
   const latestCreatinine = creatinineObs[creatinineObs.length - 1] || null;
 
   // Map observations to chronological history arrays for trend analysis
@@ -752,7 +845,7 @@ export default function DoctorPatientRecordPage({
               <span className="w-2 h-2 rounded-full bg-[#2F7D78] animate-pulse" />
               <ShieldCheck className="w-4 h-4 text-[#2F7D78]" />
               <span className="text-xs text-[#2F7D78] font-medium truncate max-w-xs">
-                Active Consent • Dr. {authorization.authorizedDoctor}
+                Active Consent • Dr. {authorization?.authorizedDoctor || "Attending Doctor"}
               </span>
             </div>
 
@@ -763,7 +856,7 @@ export default function DoctorPatientRecordPage({
               title="Notifications"
             >
               <Bell className="w-4 h-4" />
-              {medications.needsReview.length > 0 && (
+              {safeMedications.needsReview.length > 0 && (
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#DC2626]" />
               )}
             </button>
@@ -772,14 +865,14 @@ export default function DoctorPatientRecordPage({
             <div className="flex items-center gap-2.5 pl-2 border-l border-[#DCE4ED]">
               <div className="hidden sm:flex flex-col text-right">
                 <span className="text-xs font-semibold text-[#0F172A] leading-tight">
-                  Dr. {authorization.authorizedDoctor}
+                  Dr. {authorization?.authorizedDoctor || "Doctor"}
                 </span>
                 <span className="text-[11px] font-mono text-[#64748B] leading-tight">
-                  {authorization.doctorCode}
+                  {authorization?.doctorCode || ""}
                 </span>
               </div>
               <div className="w-8 h-8 rounded-full bg-[#2F7D78] text-white flex items-center justify-center font-bold text-xs">
-                {authorization.authorizedDoctor.charAt(0).toUpperCase()}
+                {(authorization?.authorizedDoctor || "D").trim().charAt(0).toUpperCase()}
               </div>
             </div>
           </div>
@@ -883,12 +976,13 @@ export default function DoctorPatientRecordPage({
               <div className="lg:col-span-5 flex items-start gap-4 min-w-0">
                 <div className="relative shrink-0">
                   <div className="w-16 h-16 rounded-xl bg-[#E8F6F4] flex items-center justify-center text-[#2F7D78] font-bold text-2xl shadow-xs select-none">
-                    {patient.name
+                    {(patient?.name || "Patient")
                       .split(" ")
+                      .filter(Boolean)
                       .map((n) => n[0])
                       .join("")
                       .toUpperCase()
-                      .slice(0, 2)}
+                      .slice(0, 2) || "PT"}
                   </div>
                   <span
                     className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#2F7D78] text-white flex items-center justify-center ring-2 ring-white shadow-xs"
@@ -901,7 +995,7 @@ export default function DoctorPatientRecordPage({
                 <div className="flex flex-col min-w-0 gap-1 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl sm:text-2xl font-bold text-[#0F172A] tracking-tight">
-                      {patient.name}
+                      {patient?.name || "Patient"}
                     </h1>
                     <span className="px-2.5 py-0.5 rounded-full bg-[#F1F5F9] text-[#475569] text-xs font-medium">
                       {patientAge} {patientGender !== "Patient" ? `• ${patientGender}` : ""}
@@ -1219,7 +1313,7 @@ export default function DoctorPatientRecordPage({
                               {m.strength || ""} {m.route ? `• ${m.route}` : ""}
                             </div>
                             <div className="flex items-center gap-1.5 text-[10px] text-[#94A3B8] mt-1 font-mono">
-                              <span>Prescriber: {m.doctor || "Attending"}</span>
+                              <span>Prescriber: {formatDoctorName(m.doctor)}</span>
                             </div>
                           </div>
                         ))
@@ -1267,7 +1361,7 @@ export default function DoctorPatientRecordPage({
                           {latestEventDoc.originalName}
                         </p>
                         <p className="text-[11px] text-[#64748B]">
-                          {latestEventDoc.structuredResult?.hospital || "Hospital"} • {latestEventDoc.structuredResult?.doctor || "Attending Physician"}
+                          {formatHospitalName(latestEventDoc.structuredResult?.hospital)} • {formatDoctorName(latestEventDoc.structuredResult?.doctor)}
                         </p>
                         {latestEventDoc.summary && (
                           <div className="mt-2 text-xs text-[#0F172A] bg-[#F8FAFC] p-2 rounded leading-relaxed border border-[#E2E8F0] line-clamp-2">
@@ -1594,7 +1688,7 @@ export default function DoctorPatientRecordPage({
                         `${patientAge} ${patientGender} with documented medical history, managed predominantly through outpatient consultation.`}
                     </span>
                     <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 mx-1 rounded bg-[#F1F5F9] text-[#2F7D78] font-mono text-[10px] font-semibold">
-                      [EHR #{patient.patientId.slice(-4)}]
+                      [EHR #{(patient?.patientId || cleanPatientId || "0000").slice(-4)}]
                     </span>
                   </div>
                 </div>
@@ -1607,13 +1701,13 @@ export default function DoctorPatientRecordPage({
                   <div className="flex-1">
                     <strong className="text-[#0F172A] text-xs">Current Medication Context & Safety: </strong>
                     <span className="text-[#334155]">
-                      {medications.active.length > 0 ? (
-                        `Active therapy regimen encompasses ${medications.active.map((m) => m.name).join(", ")}. `
+                      {safeMedications.active.length > 0 ? (
+                        `Active therapy regimen encompasses ${safeMedications.active.map((m) => m.name).join(", ")}. `
                       ) : (
                         "No currently ongoing medications identified on active registry. "
                       )}
-                      {medications.needsReview.length > 0
-                        ? `Clinical discrepancy flagged: ${medications.needsReview[0].name} requires reconciliation between recent documents.`
+                      {safeMedications.needsReview.length > 0
+                        ? `Clinical discrepancy flagged: ${safeMedications.needsReview[0].name} requires reconciliation between recent documents.`
                         : "All medication items match verified prescriptions."}
                     </span>
                     {documents[0] && (
@@ -1947,11 +2041,11 @@ export default function DoctorPatientRecordPage({
                         <div className="p-3 rounded-lg bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col gap-1.5 text-xs">
                           <div className="flex items-center gap-2 text-[#0F172A]">
                             <strong className="font-semibold">
-                              {doc.structuredResult?.doctor || "Attending Physician"}
+                              {formatDoctorName(doc.structuredResult?.doctor)}
                             </strong>
                             <span className="text-[#94A3B8]">•</span>
                             <span className="text-[#64748B]">
-                              {doc.structuredResult?.hospital || "Medical Facility"}
+                              {formatHospitalName(doc.structuredResult?.hospital)}
                             </span>
                           </div>
                           {doc.summary && (
@@ -2077,7 +2171,7 @@ export default function DoctorPatientRecordPage({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-[#64748B]">Facility / Clinic:</span>
-                <span className="font-semibold">{selectedDocForModal.structuredResult?.hospital || "Medical Facility"}</span>
+                <span className="font-semibold">{formatHospitalName(selectedDocForModal.structuredResult?.hospital)}</span>
               </div>
 
               {selectedDocForModal.summary && (
