@@ -22,6 +22,11 @@ import {
   Clock,
   Sparkles,
   AlertTriangle,
+  Pencil,
+  Trash2,
+  X,
+  Loader2,
+  ShieldAlert,
 } from "lucide-react";
 import { usePatientDashboard } from "@/app/patient/context";
 
@@ -109,6 +114,7 @@ function Sparkline({
 export default function OverviewPage() {
   const router = useRouter();
   const {
+    refresh,
     userData,
     metrics,
     documents,
@@ -125,6 +131,141 @@ export default function OverviewPage() {
     setAddAllergyModalOpen,
     setAddConditionModalOpen,
   } = usePatientDashboard();
+
+  // Refresh dashboard data on mount to ensure latest allergies and statuses are loaded
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Modify / Edit Allergy Modal State
+  const [editAllergyModal, setEditAllergyModal] = useState<{
+    open: boolean;
+    allergy: any | null;
+    allergen: string;
+    category: string;
+    reaction: string;
+    severity: string;
+    status: string;
+    notes: string;
+    submitting: boolean;
+  }>({
+    open: false,
+    allergy: null,
+    allergen: "",
+    category: "Medication",
+    reaction: "",
+    severity: "Moderate",
+    status: "Patient Reported",
+    notes: "",
+    submitting: false,
+  });
+
+  // Delete Allergy Modal State
+  const [deleteAllergyModal, setDeleteAllergyModal] = useState<{
+    open: boolean;
+    allergy: any | null;
+    submitting: boolean;
+  }>({
+    open: false,
+    allergy: null,
+    submitting: false,
+  });
+
+  const openEditModal = (allergy: any) => {
+    setEditAllergyModal({
+      open: true,
+      allergy,
+      allergen: allergy.allergen || "",
+      category: allergy.category || "Medication",
+      reaction: allergy.reaction || "",
+      severity: allergy.severity || "Moderate",
+      status: allergy.status || "Patient Reported",
+      notes: allergy.notes || "",
+      submitting: false,
+    });
+  };
+
+  const handleUpdateAllergy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editAllergyModal.allergy) return;
+    try {
+      setEditAllergyModal((prev) => ({ ...prev, submitting: true }));
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      const res = await fetch(`/api/patient/allergies/${editAllergyModal.allergy.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          id: editAllergyModal.allergy.id,
+          allergen: editAllergyModal.allergen,
+          category: editAllergyModal.category,
+          reaction: editAllergyModal.reaction,
+          severity: editAllergyModal.severity,
+          status: editAllergyModal.status,
+          notes: editAllergyModal.notes,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEditAllergyModal({
+          open: false,
+          allergy: null,
+          allergen: "",
+          category: "Medication",
+          reaction: "",
+          severity: "Moderate",
+          status: "Patient Reported",
+          notes: "",
+          submitting: false,
+        });
+        await refresh();
+      } else {
+        alert(data.error || "Failed to update allergy");
+        setEditAllergyModal((prev) => ({ ...prev, submitting: false }));
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+      setEditAllergyModal((prev) => ({ ...prev, submitting: false }));
+    }
+  };
+
+  const openDeleteModal = (allergy: any) => {
+    setDeleteAllergyModal({
+      open: true,
+      allergy,
+      submitting: false,
+    });
+  };
+
+  const handleDeleteAllergy = async () => {
+    if (!deleteAllergyModal.allergy) return;
+    try {
+      setDeleteAllergyModal((prev) => ({ ...prev, submitting: true }));
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      const res = await fetch(`/api/patient/allergies/${deleteAllergyModal.allergy.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDeleteAllergyModal({ open: false, allergy: null, submitting: false });
+        await refresh();
+      } else {
+        alert(data.error || "Failed to delete allergy");
+        setDeleteAllergyModal((prev) => ({ ...prev, submitting: false }));
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+      setDeleteAllergyModal((prev) => ({ ...prev, submitting: false }));
+    }
+  };
 
   const conflictingMedsList = React.useMemo(() => {
     if (conflictingMedicines && conflictingMedicines.length > 0) {
@@ -433,22 +574,63 @@ export default function OverviewPage() {
                         allergy.verification_status === "Hospital Verified" ||
                         allergy.status === "Clinical Verified" ||
                         allergy.status === "Hospital Verified";
+                      const isDiscontinuedMed =
+                        allergy.source === "Medication Discontinuation" ||
+                        (allergy.notes && allergy.notes.toLowerCase().includes("discontinued"));
+                      const isSevere = allergy.severity === "Severe";
                       return (
                         <div
                           key={allergy.id || idx}
-                          className="p-3 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 space-y-1"
+                          className="p-3 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 space-y-1.5 transition-all hover:border-[#CBD5E1]"
                         >
                           <div className="flex items-start justify-between gap-1">
                             <span className="text-[13px] text-[#111827] font-semibold">
                               {allergy.allergen}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10.5px] bg-[#DCE4ED] text-[#111827] font-medium">
-                              {allergy.category || "Medication"}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              {isDiscontinuedMed && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-50 border border-rose-200 text-rose-700 font-bold flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3 text-rose-500" />
+                                  Discontinued Medicine
+                                </span>
+                              )}
+                              {isSevere && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-50 border border-amber-200 text-amber-800 font-bold">
+                                  Severe
+                                </span>
+                              )}
+                              <span className="px-1.5 py-0.5 rounded text-[10.5px] bg-[#DCE4ED] text-[#111827] font-medium">
+                                {allergy.category || "Medication"}
+                              </span>
+                              {/* Modify & Delete Allergy Buttons */}
+                              <div className="flex items-center gap-1 ml-1 bg-white border border-[#DCE4ED] rounded-lg p-0.5 shadow-2xs">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(allergy)}
+                                  title="Modify Allergy"
+                                  className="p-1 text-slate-500 hover:text-teal-700 hover:bg-teal-50 rounded transition-colors cursor-pointer"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openDeleteModal(allergy)}
+                                  title="Delete Allergy"
+                                  className="p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
                           </div>
                           <p className="text-[12px] text-[#64748B]">
-                            Reaction: {allergy.reaction || "Not documented"}
+                            Reaction: <span className="font-medium text-[#334155]">{allergy.reaction || "Not documented"}</span>
                           </p>
+                          {allergy.notes && (
+                            <p className="text-[11px] text-[#475569] bg-white/70 px-2 py-1 rounded border border-[#DCE4ED]/50 italic">
+                              {allergy.notes}
+                            </p>
+                          )}
                           <div className="flex items-center justify-between pt-0.5 text-[11px] text-[#64748B]">
                             {isVerified ? (
                               <span className="flex items-center gap-1 font-semibold text-[#2F7D78]">
@@ -1030,6 +1212,244 @@ export default function OverviewPage() {
           HealthRecord AI Patient Clinical Portal • Secure HIPAA & ABDM Compliant Architecture
         </p>
       </footer>
+
+      {/* Modify / Edit Allergy Modal */}
+      {editAllergyModal.open && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center">
+                  <Pencil className="w-4 h-4 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Modify Allergy Sensitivity</h3>
+                  <p className="text-[11px] text-slate-500">Update reaction, severity, or notes for this allergy</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditAllergyModal((prev) => ({ ...prev, open: false, allergy: null }))}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateAllergy} className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Allergen / Substance *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editAllergyModal.allergen}
+                    onChange={(e) =>
+                      setEditAllergyModal((prev) => ({ ...prev, allergen: e.target.value }))
+                    }
+                    className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500 font-medium"
+                    placeholder="e.g. Penicillin, Peanuts"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={editAllergyModal.category}
+                    onChange={(e) =>
+                      setEditAllergyModal((prev) => ({ ...prev, category: e.target.value }))
+                    }
+                    className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="Medication">Medication</option>
+                    <option value="Food">Food</option>
+                    <option value="Environmental">Environmental</option>
+                    <option value="Biologic">Biologic</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Observed Reaction / Symptoms
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Cutaneous rash, facial swelling, nausea"
+                  value={editAllergyModal.reaction}
+                  onChange={(e) =>
+                    setEditAllergyModal((prev) => ({ ...prev, reaction: e.target.value }))
+                  }
+                  className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Severity
+                  </label>
+                  <select
+                    value={editAllergyModal.severity}
+                    onChange={(e) =>
+                      setEditAllergyModal((prev) => ({ ...prev, severity: e.target.value }))
+                    }
+                    className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500 font-medium"
+                  >
+                    <option value="Mild">Mild</option>
+                    <option value="Moderate">Moderate</option>
+                    <option value="Severe">Severe</option>
+                    <option value="Anaphylaxis">Anaphylaxis</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Status / Provenance
+                  </label>
+                  <select
+                    value={editAllergyModal.status}
+                    onChange={(e) =>
+                      setEditAllergyModal((prev) => ({ ...prev, status: e.target.value }))
+                    }
+                    className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="Patient Reported">Patient Reported</option>
+                    <option value="Clinical Verified">Clinical Verified</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Clinical Notes / Context
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Additional observations, onset details, or guidance..."
+                  value={editAllergyModal.notes}
+                  onChange={(e) =>
+                    setEditAllergyModal((prev) => ({ ...prev, notes: e.target.value }))
+                  }
+                  className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditAllergyModal((prev) => ({ ...prev, open: false, allergy: null }))}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editAllergyModal.submitting}
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#2F7D78] hover:bg-[#256B66] rounded-xl shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  {editAllergyModal.submitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Allergy Confirmation Modal */}
+      {deleteAllergyModal.open && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <ShieldAlert className="w-4 h-4 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Delete Allergy Record</h3>
+                  <p className="text-[11px] text-slate-500">Remove documented hypersensitivity</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteAllergyModal({ open: false, allergy: null, submitting: false })}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Are you sure you want to remove{" "}
+                <strong className="text-slate-900">
+                  {deleteAllergyModal.allergy?.allergen || "this allergy"}
+                </strong>{" "}
+                from your active allergy profile?
+              </p>
+
+              {deleteAllergyModal.allergy && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1 text-xs">
+                  <div className="flex justify-between items-center text-slate-800 font-semibold">
+                    <span>{deleteAllergyModal.allergy.allergen}</span>
+                    <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                      {deleteAllergyModal.allergy.category || "Medication"}
+                    </span>
+                  </div>
+                  {deleteAllergyModal.allergy.reaction && (
+                    <p className="text-slate-500 text-[11.5px]">
+                      Reaction: <span className="text-slate-700">{deleteAllergyModal.allergy.reaction}</span>
+                    </p>
+                  )}
+                  {deleteAllergyModal.allergy.severity && (
+                    <p className="text-slate-500 text-[11.5px]">
+                      Severity: <span className="text-slate-700">{deleteAllergyModal.allergy.severity}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[11px] text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200/70 leading-relaxed">
+                Note: This record will be hidden from your active profile and alerts. If this allergy was generated from a discontinued medication, deleting it ensures it won&apos;t automatically reappear.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteAllergyModal({ open: false, allergy: null, submitting: false })}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAllergy}
+                disabled={deleteAllergyModal.submitting}
+                className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                {deleteAllergyModal.submitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" /> Confirm Delete
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

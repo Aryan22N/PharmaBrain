@@ -178,10 +178,101 @@ export async function PATCH(
       ]
     );
 
+    // If marked DISCONTINUED due to an allergy or adverse reaction, automatically record in patient_allergies
+    let allergyRecord: any = null;
+    const isAllergy =
+      newStatus === "DISCONTINUED" &&
+      (Boolean(body.isAllergy) ||
+        body.reasonCategory === "ALLERGY" ||
+        /allerg|alergy/i.test(effectiveReason || "") ||
+        /allerg|alergy/i.test(discReason || "") ||
+        /allerg|alergy/i.test(body.allergyReaction || ""));
+
+    if (isAllergy) {
+      try {
+        await query(`
+          CREATE TABLE IF NOT EXISTS patient_allergies (
+            id SERIAL PRIMARY KEY,
+            patient_id VARCHAR(64),
+            user_id INTEGER,
+            allergen VARCHAR(255) NOT NULL,
+            category VARCHAR(100) DEFAULT 'Medication',
+            reaction TEXT,
+            severity VARCHAR(50) DEFAULT 'Moderate',
+            status VARCHAR(100) DEFAULT 'Patient Reported',
+            source VARCHAR(100) DEFAULT 'Medication Discontinuation',
+            verification_status VARCHAR(100) DEFAULT 'Patient Reported',
+            added_date VARCHAR(100),
+            notes TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_patient_allergies_patient ON patient_allergies(patient_id);
+          CREATE INDEX IF NOT EXISTS idx_patient_allergies_user ON patient_allergies(user_id);
+        `);
+
+        const allergenName = (existing.name || "Medication").trim();
+        const primaryPatientId = existing.patient_id || patientIds[0];
+        const allergyReaction = (body.allergyReaction || effectiveReason || "Adverse allergic reaction").trim();
+        const allergySeverity = body.allergySeverity || "Moderate";
+        const todayFormatted = new Date().toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        });
+        const allergyNotes =
+          body.notes ||
+          `Discontinued medication on ${todayFormatted} due to reported allergy / adverse reaction: ${effectiveReason || allergyReaction}`;
+
+        const existingAllergy = await query(
+          `SELECT id FROM patient_allergies
+           WHERE (patient_id = ANY($1::text[]) OR user_id = $2)
+             AND LOWER(TRIM(allergen)) = LOWER(TRIM($3))
+           LIMIT 1;`,
+          [patientIds, payload.userId, allergenName]
+        );
+
+        if (existingAllergy.length > 0) {
+          const updatedAllergy = await query(
+            `UPDATE patient_allergies
+             SET reaction = $1,
+                 severity = $2,
+                 status = 'Patient Reported',
+                 source = 'Medication Discontinuation',
+                 notes = $3
+             WHERE id = $4
+             RETURNING *;`,
+            [allergyReaction, allergySeverity, allergyNotes, existingAllergy[0].id]
+          );
+          allergyRecord = updatedAllergy[0];
+        } else {
+          const insertedAllergy = await query(
+            `INSERT INTO patient_allergies
+             (patient_id, user_id, allergen, category, reaction, severity, status, source, verification_status, added_date, notes)
+             VALUES ($1, $2, $3, 'Medication', $4, $5, 'Patient Reported', 'Medication Discontinuation', 'Patient Reported', $6, $7)
+             RETURNING *;`,
+            [
+              primaryPatientId,
+              payload.userId,
+              allergenName,
+              allergyReaction,
+              allergySeverity,
+              todayFormatted,
+              allergyNotes,
+            ]
+          );
+          allergyRecord = insertedAllergy[0];
+        }
+      } catch (allergyErr) {
+        console.error("Could not sync discontinued medication to patient_allergies:", allergyErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Medication status updated to ${newStatus}`,
+      message: `Medication status updated to ${newStatus}${isAllergy ? " and added to your Allergies list" : ""}`,
       medication: updated,
+      allergyAdded: Boolean(allergyRecord),
+      allergy: allergyRecord,
     });
   } catch (error: any) {
     console.error("Update Medication Error:", error);

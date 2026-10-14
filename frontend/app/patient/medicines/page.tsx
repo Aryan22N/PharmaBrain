@@ -26,6 +26,8 @@ import {
   ExternalLink,
   Info,
   ZoomIn,
+  ShieldAlert,
+  ArrowRight,
 } from "lucide-react";
 import { usePatientDashboard } from "@/app/patient/context";
 
@@ -74,14 +76,46 @@ export default function MedicinesPage() {
     open: boolean;
     med: any | null;
     targetStatus: "COMPLETED" | "ON_HOLD" | "DISCONTINUED" | null;
+    reasonCategory: string;
+    allergyReaction: string;
+    allergySeverity: "Mild" | "Moderate" | "Severe";
+    syncToAllergies: boolean;
     reason: string;
     submitting: boolean;
   }>({
     open: false,
     med: null,
     targetStatus: null,
+    reasonCategory: "",
+    allergyReaction: "",
+    allergySeverity: "Moderate",
+    syncToAllergies: true,
     reason: "",
     submitting: false,
+  });
+
+  const resetStatusModal = () => {
+    setStatusModal({
+      open: false,
+      med: null,
+      targetStatus: null,
+      reasonCategory: "",
+      allergyReaction: "",
+      allergySeverity: "Moderate",
+      syncToAllergies: true,
+      reason: "",
+      submitting: false,
+    });
+  };
+
+  const [allergyToast, setAllergyToast] = useState<{
+    show: boolean;
+    medName: string;
+    message: string;
+  }>({
+    show: false,
+    medName: "",
+    message: "",
   });
 
   const SUGGESTED_REASONS: Record<string, string[]> = {
@@ -98,7 +132,8 @@ export default function MedicinesPage() {
       "Temporary fasting / travel pause",
     ],
     DISCONTINUED: [
-      "Adverse side effects / allergic reaction",
+      "Allergic reaction / Drug allergy",
+      "Adverse side effects / intolerance",
       "Doctor switched to alternative medication",
       "Condition resolved early / no longer indicated",
       "Ineffective therapeutic response",
@@ -198,7 +233,11 @@ export default function MedicinesPage() {
       open: true,
       med,
       targetStatus,
-      reason: "",
+      reasonCategory: targetStatus === "DISCONTINUED" ? "ALLERGY" : "",
+      allergyReaction: "",
+      allergySeverity: "Moderate",
+      syncToAllergies: true,
+      reason: targetStatus === "DISCONTINUED" ? "Allergic reaction to medication" : "",
       submitting: false,
     });
   };
@@ -207,9 +246,11 @@ export default function MedicinesPage() {
   const submitStatusTransition = async () => {
     if (!statusModal.med || !statusModal.targetStatus) return;
 
+    const trimmedReason = statusModal.reason.trim();
     if (
       (statusModal.targetStatus === "DISCONTINUED" || statusModal.targetStatus === "ON_HOLD") &&
-      !statusModal.reason.trim()
+      !trimmedReason &&
+      !statusModal.allergyReaction
     ) {
       alert(
         `Please provide a reason for placing this medication on ${
@@ -220,23 +261,46 @@ export default function MedicinesPage() {
     }
 
     setStatusModal((prev) => ({ ...prev, submitting: true }));
-    const trimmedReason = statusModal.reason.trim();
+
+    const isAllergy =
+      statusModal.targetStatus === "DISCONTINUED" &&
+      (statusModal.reasonCategory === "ALLERGY" ||
+        /allerg|alergy/i.test(trimmedReason) ||
+        /allerg|alergy/i.test(statusModal.allergyReaction) ||
+        Boolean(statusModal.allergyReaction));
+
+    const effectiveReason =
+      trimmedReason ||
+      (statusModal.targetStatus === "COMPLETED"
+        ? "Course completed as prescribed"
+        : isAllergy
+        ? statusModal.allergyReaction
+          ? `Allergic reaction: ${statusModal.allergyReaction}`
+          : "Allergic reaction to medication"
+        : "");
+
+    const medName = statusModal.med.name;
+
     const ok = await handleUpdateStatus(statusModal.med.id, statusModal.targetStatus, {
-      reason:
-        trimmedReason ||
-        (statusModal.targetStatus === "COMPLETED"
-          ? "Course completed as prescribed"
-          : ""),
-      statusReason:
-        trimmedReason ||
-        (statusModal.targetStatus === "COMPLETED"
-          ? "Course completed as prescribed"
-          : ""),
-      discontinuedReason:
-        statusModal.targetStatus === "DISCONTINUED" ? trimmedReason : undefined,
+      reason: effectiveReason,
+      statusReason: effectiveReason,
+      discontinuedReason: statusModal.targetStatus === "DISCONTINUED" ? effectiveReason : undefined,
+      isAllergy,
+      reasonCategory: statusModal.reasonCategory,
+      allergyReaction: statusModal.allergyReaction || effectiveReason,
+      allergySeverity: statusModal.allergySeverity,
+      syncToAllergies: statusModal.syncToAllergies,
     });
+
     if (ok) {
-      setStatusModal({ open: false, med: null, targetStatus: null, reason: "", submitting: false });
+      if (isAllergy) {
+        setAllergyToast({
+          show: true,
+          medName,
+          message: `${medName} was discontinued and added to My Allergies on your Overview page.`,
+        });
+      }
+      resetStatusModal();
     } else {
       setStatusModal((prev) => ({ ...prev, submitting: false }));
     }
@@ -949,15 +1013,7 @@ export default function MedicinesPage() {
                 </h3>
               </div>
               <button
-                onClick={() =>
-                  setStatusModal({
-                    open: false,
-                    med: null,
-                    targetStatus: null,
-                    reason: "",
-                    submitting: false,
-                  })
-                }
+                onClick={resetStatusModal}
                 className="text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -1010,88 +1066,308 @@ export default function MedicinesPage() {
               </p>
             </div>
 
-            {/* Quick Suggested Reason Chips */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-700 block">
-                Quick Suggestions (click to populate):
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {(SUGGESTED_REASONS[statusModal.targetStatus] || []).map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() =>
-                      setStatusModal((prev) => ({
-                        ...prev,
-                        reason: suggestion,
-                      }))
-                    }
-                    className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
-                      statusModal.reason === suggestion
-                        ? statusModal.targetStatus === "COMPLETED"
-                          ? "bg-emerald-100 border-emerald-400 text-emerald-900 font-bold"
-                          : statusModal.targetStatus === "ON_HOLD"
-                          ? "bg-amber-100 border-amber-400 text-amber-900 font-bold"
-                          : "bg-rose-100 border-rose-400 text-rose-900 font-bold"
-                        : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
-                    }`}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Discontinuation Reason Categories & Allergy Details */}
+            {statusModal.targetStatus === "DISCONTINUED" ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                    <span>Reason for Discontinuing Medication:</span>
+                    <span className="text-rose-500 font-normal">* (Required)</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusModal((prev) => ({
+                          ...prev,
+                          reasonCategory: "ALLERGY",
+                          allergyReaction: prev.allergyReaction || "Skin rash / Allergic reaction",
+                          reason: prev.reason || "Allergic reaction to medication",
+                        }));
+                      }}
+                      className={`p-2.5 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
+                        statusModal.reasonCategory === "ALLERGY" ||
+                        /allerg|alergy/i.test(statusModal.reason)
+                          ? "bg-rose-50 border-rose-400 text-rose-900 shadow-xs ring-2 ring-rose-300"
+                          : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                      }`}
+                    >
+                      <ShieldAlert className="w-4 h-4 text-rose-600 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-xs font-bold">Allergy / Sensitivity</div>
+                        <div className="text-[10px] text-slate-500">Rash, hives, swelling, reaction</div>
+                      </div>
+                    </button>
 
-            {/* Reason Message Box */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                <span>
-                  {statusModal.targetStatus === "COMPLETED" && "Completion Reason / Notes"}
-                  {statusModal.targetStatus === "ON_HOLD" && "Reason for Hold"}
-                  {statusModal.targetStatus === "DISCONTINUED" && "Discontinuation Reason"}
-                  {statusModal.targetStatus !== "COMPLETED" && (
-                    <span className="text-rose-500 font-normal ml-1">* (Required)</span>
-                  )}
-                </span>
-                <span className="text-[10px] text-slate-400 font-normal">
-                  Saved directly to database & audit log
-                </span>
-              </label>
-              <textarea
-                rows={3}
-                placeholder={
-                  statusModal.targetStatus === "COMPLETED"
-                    ? "e.g. Finished full prescribed 7-day course with relief, symptoms cleared..."
-                    : statusModal.targetStatus === "ON_HOLD"
-                    ? "e.g. Temporarily pausing 3 days prior to endoscopy, awaiting renal panel results..."
-                    : "e.g. Experienced severe gastrointestinal upset, doctor switched to alternate therapy..."
-                }
-                value={statusModal.reason}
-                onChange={(e) =>
-                  setStatusModal((prev) => ({ ...prev, reason: e.target.value }))
-                }
-                className={`w-full text-xs p-3 rounded-xl border bg-slate-50 focus:bg-white focus:outline-none text-slate-800 transition-colors ${
-                  statusModal.targetStatus === "COMPLETED"
-                    ? "border-slate-200 focus:border-emerald-500"
-                    : statusModal.targetStatus === "ON_HOLD"
-                    ? "border-slate-200 focus:border-amber-500"
-                    : "border-slate-200 focus:border-rose-500"
-                }`}
-              />
-            </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusModal((prev) => ({
+                          ...prev,
+                          reasonCategory: "SIDE_EFFECTS",
+                          reason: "Intolerable adverse side effects",
+                        }));
+                      }}
+                      className={`p-2.5 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
+                        statusModal.reasonCategory === "SIDE_EFFECTS"
+                          ? "bg-amber-50 border-amber-400 text-amber-900 shadow-xs ring-2 ring-amber-300"
+                          : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                      }`}
+                    >
+                      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-xs font-bold">Side Effects / Intolerance</div>
+                        <div className="text-[10px] text-slate-500">Nausea, headache, dizziness</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusModal((prev) => ({
+                          ...prev,
+                          reasonCategory: "SWITCHED",
+                          reason: "Doctor switched to alternative medication",
+                        }));
+                      }}
+                      className={`p-2.5 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
+                        statusModal.reasonCategory === "SWITCHED"
+                          ? "bg-blue-50 border-blue-400 text-blue-900 shadow-xs ring-2 ring-blue-300"
+                          : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                      }`}
+                    >
+                      <ArrowRight className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-xs font-bold">Switched by Doctor</div>
+                        <div className="text-[10px] text-slate-500">Changed to alternative therapy</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusModal((prev) => ({
+                          ...prev,
+                          reasonCategory: "RESOLVED",
+                          reason: "Condition resolved early / no longer indicated",
+                        }));
+                      }}
+                      className={`p-2.5 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
+                        statusModal.reasonCategory === "RESOLVED"
+                          ? "bg-emerald-50 border-emerald-400 text-emerald-900 shadow-xs ring-2 ring-emerald-300"
+                          : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-xs font-bold">Condition Resolved</div>
+                        <div className="text-[10px] text-slate-500">Symptoms cleared / unneeded</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* If Allergy is selected, show Allergy Integration Banner & Specific Reactions */}
+                {(statusModal.reasonCategory === "ALLERGY" ||
+                  /allerg|alergy/i.test(statusModal.reason)) && (
+                  <div className="p-3.5 bg-rose-50/90 border border-rose-200 rounded-xl space-y-2.5 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-rose-900">
+                        <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>Overview Allergy Profile Integration</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-rose-200/80 text-rose-800 text-[10px] font-bold">
+                        Will appear on Overview
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-rose-800 leading-snug">
+                      <strong>{statusModal.med.name}</strong> will be automatically added to your{" "}
+                      <strong>My Allergies</strong> profile on the{" "}
+                      <a
+                        href="/patient/overview"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline font-bold text-rose-900 hover:text-rose-950 inline-flex items-center gap-0.5"
+                      >
+                        Overview page
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>{" "}
+                      to protect you from accidental re-prescription.
+                    </p>
+
+                    {/* Common Allergy Reaction Chips */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-rose-900 block">
+                        Select Reaction Symptom:
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          "Skin Rash / Hives",
+                          "Facial / Lip Swelling",
+                          "Severe Itching / Erythema",
+                          "Breathing Difficulty",
+                          "Nausea / GI Distress",
+                          "Anaphylactic Reaction",
+                        ].map((rxOption) => (
+                          <button
+                            key={rxOption}
+                            type="button"
+                            onClick={() =>
+                              setStatusModal((prev) => ({
+                                ...prev,
+                                allergyReaction: rxOption,
+                                reason: prev.reason.includes("Allergic reaction")
+                                  ? `Allergic reaction: ${rxOption}`
+                                  : prev.reason
+                                  ? `${prev.reason} (${rxOption})`
+                                  : `Allergic reaction: ${rxOption}`,
+                              }))
+                            }
+                            className={`text-[10px] px-2 py-1 rounded-lg border transition-all cursor-pointer ${
+                              statusModal.allergyReaction === rxOption
+                                ? "bg-rose-600 border-rose-600 text-white font-bold shadow-xs"
+                                : "bg-white border-rose-200 text-rose-800 hover:bg-rose-100/70"
+                            }`}
+                          >
+                            {rxOption}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Severity & Toggle */}
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-rose-200/60 text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-rose-900">Severity:</span>
+                        {(["Mild", "Moderate", "Severe"] as const).map((sev) => (
+                          <label
+                            key={sev}
+                            className="flex items-center gap-1 cursor-pointer font-medium text-rose-800"
+                          >
+                            <input
+                              type="radio"
+                              name="allergySeverity"
+                              value={sev}
+                              checked={statusModal.allergySeverity === sev}
+                              onChange={() =>
+                                setStatusModal((prev) => ({ ...prev, allergySeverity: sev }))
+                              }
+                              className="text-rose-600 focus:ring-rose-500"
+                            />
+                            <span>{sev}</span>
+                          </label>
+                        ))}
+                      </div>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-rose-900 font-semibold text-[10.5px]">
+                        <input
+                          type="checkbox"
+                          checked={statusModal.syncToAllergies}
+                          onChange={(e) =>
+                            setStatusModal((prev) => ({
+                              ...prev,
+                              syncToAllergies: e.target.checked,
+                            }))
+                          }
+                          className="rounded text-rose-600 focus:ring-rose-500"
+                        />
+                        <span>Show in Overview Allergies</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reason Details Text Area */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                    <span>Clinical Notes / Reason Description:</span>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      Saved to EHR database
+                    </span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Developed widespread rash, severe itching, advised to discontinue immediately..."
+                    value={statusModal.reason}
+                    onChange={(e) =>
+                      setStatusModal((prev) => ({ ...prev, reason: e.target.value }))
+                    }
+                    className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none text-slate-800 focus:border-rose-500 transition-colors"
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Quick Suggested Reason Chips for Completed or On Hold */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-700 block">
+                    Quick Suggestions (click to populate):
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(SUGGESTED_REASONS[statusModal.targetStatus] || []).map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() =>
+                          setStatusModal((prev) => ({
+                            ...prev,
+                            reason: suggestion,
+                          }))
+                        }
+                        className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                          statusModal.reason === suggestion
+                            ? statusModal.targetStatus === "COMPLETED"
+                              ? "bg-emerald-100 border-emerald-400 text-emerald-900 font-bold"
+                              : "bg-amber-100 border-amber-400 text-amber-900 font-bold"
+                            : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
+                        }`}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Reason Message Box */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                    <span>
+                      {statusModal.targetStatus === "COMPLETED" && "Completion Reason / Notes"}
+                      {statusModal.targetStatus === "ON_HOLD" && "Reason for Hold"}
+                      {statusModal.targetStatus !== "COMPLETED" && (
+                        <span className="text-rose-500 font-normal ml-1">* (Required)</span>
+                      )}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      Saved directly to database & audit log
+                    </span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder={
+                      statusModal.targetStatus === "COMPLETED"
+                        ? "e.g. Finished full prescribed 7-day course with relief, symptoms cleared..."
+                        : "e.g. Temporarily pausing 3 days prior to endoscopy, awaiting renal panel results..."
+                    }
+                    value={statusModal.reason}
+                    onChange={(e) =>
+                      setStatusModal((prev) => ({ ...prev, reason: e.target.value }))
+                    }
+                    className={`w-full text-xs p-3 rounded-xl border bg-slate-50 focus:bg-white focus:outline-none text-slate-800 transition-colors ${
+                      statusModal.targetStatus === "COMPLETED"
+                        ? "border-slate-200 focus:border-emerald-500"
+                        : "border-slate-200 focus:border-amber-500"
+                    }`}
+                  />
+                </div>
+              </>
+            )}
 
             {/* Modal Actions */}
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
-                onClick={() =>
-                  setStatusModal({
-                    open: false,
-                    med: null,
-                    targetStatus: null,
-                    reason: "",
-                    submitting: false,
-                  })
-                }
+                onClick={resetStatusModal}
                 className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
@@ -1364,6 +1640,43 @@ export default function MedicinesPage() {
                 className="px-5 py-2 text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white rounded-xl transition-colors cursor-pointer shadow-xs"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Allergy Auto-Sync Toast Notification */}
+      {allergyToast.show && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md bg-white border border-rose-200 shadow-2xl rounded-2xl p-4 flex items-start gap-3 animate-in slide-in-from-bottom-4 duration-300">
+          <div className="w-9 h-9 rounded-xl bg-rose-100 flex items-center justify-center shrink-0 text-rose-600">
+            <ShieldAlert className="w-5 h-5" />
+          </div>
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-slate-900">Drug Allergy Recorded in EHR</h4>
+              <button
+                type="button"
+                onClick={() => setAllergyToast({ show: false, medName: "", message: "" })}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">{allergyToast.message}</p>
+            <div className="pt-1.5 flex items-center gap-2">
+              <a
+                href="/patient/overview"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 hover:text-teal-800 hover:underline bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200 transition-colors"
+              >
+                <span>View in Overview &rarr;</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setAllergyToast({ show: false, medName: "", message: "" })}
+                className="text-[10px] text-slate-400 hover:text-slate-600 ml-auto cursor-pointer"
+              >
+                Dismiss
               </button>
             </div>
           </div>

@@ -56,15 +56,121 @@ export async function GET(request: Request) {
     // 3. Fetch Patient Allergies from DB table
     let allergies: any[] = [];
     try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS patient_allergies (
+          id SERIAL PRIMARY KEY,
+          patient_id VARCHAR(64),
+          user_id INTEGER,
+          allergen VARCHAR(255) NOT NULL,
+          category VARCHAR(100) DEFAULT 'Medication',
+          reaction TEXT,
+          severity VARCHAR(50) DEFAULT 'Moderate',
+          status VARCHAR(100) DEFAULT 'Patient Reported',
+          source VARCHAR(100) DEFAULT 'Patient Portal',
+          verification_status VARCHAR(100) DEFAULT 'Patient Reported',
+          added_date VARCHAR(100),
+          notes TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_patient_allergies_patient ON patient_allergies(patient_id);
+        CREATE INDEX IF NOT EXISTS idx_patient_allergies_user ON patient_allergies(user_id);
+        ALTER TABLE patient_allergies ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+      `);
+
       allergies = await query(
         `SELECT id, allergen, category, reaction, severity, status, source, verification_status, added_date, notes
          FROM patient_allergies
-         WHERE patient_id = ANY($1::text[]) OR user_id = $2
+         WHERE (patient_id = ANY($1::text[]) OR user_id = $2)
+           AND (is_deleted IS NULL OR is_deleted = FALSE)
          ORDER BY id DESC;`,
         [patientIds, user.id]
       );
     } catch (e) {
       console.warn("Could not query patient_allergies:", e);
+    }
+
+    // Proactively sync any medications marked DISCONTINUED due to allergy into patient allergies
+    try {
+      const discAllergyMeds = await query(
+        `SELECT id, name, discontinued_reason, status_reason, actual_end_date, created_at
+         FROM patient_medications
+         WHERE (patient_id = ANY($1::text[]) OR user_id = $2)
+           AND status = 'DISCONTINUED'
+           AND (
+             discontinued_reason ILIKE '%allerg%' OR discontinued_reason ILIKE '%alergy%'
+             OR status_reason ILIKE '%allerg%' OR status_reason ILIKE '%alergy%'
+           );`,
+        [patientIds, user.id]
+      );
+
+      // Check all recorded rows in DB (including deleted ones so we never resurrect a deleted allergy)
+      const allRecordedRows = await query(
+        `SELECT LOWER(TRIM(allergen)) AS allergen_norm FROM patient_allergies
+         WHERE patient_id = ANY($1::text[]) OR user_id = $2;`,
+        [patientIds, user.id]
+      );
+      const knownAllergenNames = new Set(
+        allRecordedRows.map((r: any) => (r.allergen_norm || "").trim())
+      );
+
+      for (const med of discAllergyMeds) {
+        const medName = (med.name || "").trim();
+        if (medName && !knownAllergenNames.has(medName.toLowerCase())) {
+          const reasonText = (
+            med.discontinued_reason ||
+            med.status_reason ||
+            "Adverse allergic reaction"
+          ).trim();
+          const addedDate = med.actual_end_date
+            ? new Date(med.actual_end_date).toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : new Date().toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              });
+
+          try {
+            const inserted = await query(
+              `INSERT INTO patient_allergies
+               (patient_id, user_id, allergen, category, reaction, severity, status, source, verification_status, added_date, notes)
+               VALUES ($1, $2, $3, 'Medication', $4, 'Moderate', 'Patient Reported', 'Medication Discontinuation', 'Patient Reported', $5, $6)
+               RETURNING id, allergen, category, reaction, severity, status, source, verification_status, added_date, notes;`,
+              [
+                patientIds[0] || user.patientId,
+                user.id,
+                medName,
+                reasonText,
+                addedDate,
+                `Discontinued medication due to allergy: ${reasonText}`,
+              ]
+            );
+            if (inserted.length > 0) {
+              allergies.unshift(inserted[0]);
+              knownAllergenNames.add(medName.toLowerCase());
+            }
+          } catch {
+            allergies.unshift({
+              id: `disc-med-${med.id}`,
+              allergen: medName,
+              category: "Medication",
+              reaction: reasonText,
+              severity: "Moderate",
+              status: "Patient Reported",
+              source: "Medication Discontinuation",
+              verification_status: "Patient Reported",
+              added_date: addedDate,
+              notes: `Discontinued medication due to allergy: ${reasonText}`,
+            });
+            knownAllergenNames.add(medName.toLowerCase());
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.warn("Could not check discontinued allergy meds in dashboard:", syncErr);
     }
 
     // 4. Fetch Doctor Access Request from DB table
@@ -292,6 +398,7 @@ export async function GET(request: Request) {
         `SELECT id, patient_id, user_id, name, normalized_name, strength, status, indication,
                 frequency, route, start_date, expected_end_date, actual_end_date,
                 COALESCE(actual_end_date, expected_end_date) AS end_date,
+                discontinued_reason, status_reason,
                 duration_raw, duration_days, doctor, reference_id,
                 reconciliation_category, reconciliation_notes,
                 is_conflicting, conflict_details, source, reliability, verification_status, created_at

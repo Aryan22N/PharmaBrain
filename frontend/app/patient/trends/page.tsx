@@ -357,7 +357,7 @@ export default function TrendsPage() {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 flex-wrap">
-                  <span>Gemini Longitudinal Health Review</span>
+                  <span>Longitudinal Health Summary</span>
                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
                     AI Synthesis
                   </span>
