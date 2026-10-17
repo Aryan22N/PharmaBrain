@@ -184,7 +184,7 @@ async function verifyPrescriptionEligibility(user: any, patientIds: string[]) {
          FROM confirmed_prescriptions cp
          JOIN extractions ex ON ex.id = cp.extraction_id
          JOIN raw_ocr ro ON ro.id = ex.raw_ocr_id
-         WHERE ro.patient_id = ANY($1::text[])
+         WHERE ro.patient_id::text = ANY($1::text[])
          ORDER BY cp.id ASC;`,
         [patientIds]
       );

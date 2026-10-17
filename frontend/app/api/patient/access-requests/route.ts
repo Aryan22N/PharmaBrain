@@ -16,6 +16,25 @@ export async function GET(req: NextRequest) {
     }
     const { user: patient } = authResult;
 
+    // Ensure schema columns exist for auto-revoke
+    try {
+      await query(`ALTER TABLE patient_access_requests ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;`);
+      await query(`ALTER TABLE patient_access_requests ADD COLUMN IF NOT EXISTS duration_days INT DEFAULT 8;`);
+      // Auto-revoke any active access requests whose expiration timestamp has elapsed
+      await query(
+        `UPDATE patient_access_requests
+         SET status = 'REVOKED',
+             revoked_at = NOW()
+         WHERE patient_id = $1 
+           AND status = 'APPROVED' 
+           AND expires_at IS NOT NULL 
+           AND expires_at <= NOW();`,
+        [patient.id]
+      );
+    } catch {
+      // Ignore schema setup errors if columns exist
+    }
+
     const rows = await query<{
       id: number;
       doctor_id: number;
@@ -31,9 +50,12 @@ export async function GET(req: NextRequest) {
       requested_at: string;
       responded_at: string | null;
       revoked_at: string | null;
+      expires_at: string | null;
+      duration_days: number | null;
     }>(
       `SELECT id, doctor_id, doctor_code, doctor_name, doctor_specialization, doctor_hospital,
-              patient_id, patient_code, patient_name, status, reason, requested_at, responded_at, revoked_at
+              patient_id, patient_code, patient_name, status, reason, requested_at, responded_at, revoked_at,
+              expires_at, duration_days
        FROM patient_access_requests
        WHERE patient_id = $1
        ORDER BY requested_at DESC, id DESC;`,
@@ -55,6 +77,8 @@ export async function GET(req: NextRequest) {
       requestedAt: r.requested_at,
       respondedAt: r.responded_at,
       revokedAt: r.revoked_at,
+      expiresAt: r.expires_at,
+      durationDays: r.duration_days,
     }));
 
     return NextResponse.json({

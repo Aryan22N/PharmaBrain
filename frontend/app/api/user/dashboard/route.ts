@@ -180,10 +180,10 @@ export async function GET(request: Request) {
         `SELECT id, doctor_id, doctor_code, doctor_name, doctor_specialization, doctor_hospital,
                 status, reason, requested_at, responded_at, expires_at
          FROM patient_access_requests
-         WHERE patient_id = $1 OR patient_code = ANY($2::text[])
+         WHERE (patient_id::text = $1::text OR patient_code = ANY($2::text[]))
          ORDER BY CASE WHEN status = 'APPROVED' THEN 0 WHEN status = 'PENDING' THEN 1 ELSE 2 END, requested_at DESC
          LIMIT 1;`,
-        [user.id, patientIds]
+        [String(user.id), patientIds]
       );
       if (docReqs.length > 0) {
         doctorSharing = docReqs[0];
@@ -585,17 +585,43 @@ export async function GET(request: Request) {
           : 'No ongoing pharmacotherapy recorded.',
     };
 
+    // Query demographics or onboarding to keep user profile consistent across overview and settings
+    let demographicInfo: any = null;
+    try {
+      const dRows = await query(
+        `SELECT name, email, age, gender, blood_group, phone FROM patient_demographics WHERE user_id = $1 LIMIT 1;`,
+        [user.id]
+      );
+      if (dRows.length > 0) {
+        demographicInfo = dRows[0];
+      } else {
+        const oRows = await query(
+          `SELECT basic_info FROM patient_onboarding WHERE user_id = $1 LIMIT 1;`,
+          [user.id]
+        );
+        if (oRows.length > 0 && oRows[0].basic_info) {
+          demographicInfo = oRows[0].basic_info;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not query demographicInfo for dashboard:", e);
+    }
+
     return NextResponse.json({
       success: true,
       user: {
         id: user.id,
-        name: user.name,
-        email: user.email,
+        name: demographicInfo?.name || user.name,
+        email: demographicInfo?.email || user.email,
         patientCode,
         patientId: user.patientId,
         legacyPatientId: user.legacyPatientId || null,
         initials,
         createdAt: user.createdAt,
+        age: demographicInfo?.age || null,
+        gender: demographicInfo?.gender || "Male",
+        bloodGroup: demographicInfo?.blood_group || demographicInfo?.bloodGroup || null,
+        phone: demographicInfo?.phone || null,
       },
       metrics: {
         totalRecords: unifiedTimeline.length > 0 ? unifiedTimeline.length : totalRecords,

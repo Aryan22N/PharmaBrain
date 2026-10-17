@@ -72,7 +72,7 @@ function Sidebar() {
       icon: ShieldCheck,
       statusBadge: doctorSharing?.status === "APPROVED" ? "Connected" : undefined,
     },
-    { name: "Settings", href: "/patient/onboarding", icon: Settings },
+    { name: "Settings", href: "/patient/settings", icon: Settings },
   ];
 
   const handleLogout = async () => {
@@ -191,18 +191,6 @@ function Sidebar() {
 function TopHeader() {
   const router = useRouter();
   const pathname = usePathname();
-  const { userData, pendingDocuments } = usePatientDashboard();
-
-  const userInitials =
-    userData?.initials ??
-    (userData?.name
-      ? userData.name
-        .split(" ")
-        .map((n: string) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-      : "RS");
 
   let pageTitle = "Clinical Overview";
   if (pathname.includes("/timeline")) pageTitle = "Health Timeline";
@@ -212,6 +200,7 @@ function TopHeader() {
   else if (pathname.includes("/share") || pathname.includes("/sharing")) pageTitle = "Doctor Sharing";
   else if (pathname.includes("/symptoms")) pageTitle = "Symptom Journal";
   else if (pathname.includes("/hms")) pageTitle = "Hospital Records";
+  else if (pathname.includes("/settings")) pageTitle = "Account Settings";
 
   return (
     <header className="h-[68px] bg-white backdrop-blur-md border-b border-[#DCE4ED] shadow-[0_1px_4px_rgba(0,0,0,0.02)] sticky top-0 z-30 px-6 flex items-center justify-between">
@@ -221,38 +210,6 @@ function TopHeader() {
           <Link href="/patient/overview" className="font-medium hover:text-[#2F7D78] transition-colors">Portal</Link>
           <ChevronRight className="w-4 h-4 text-[#94A3B8]" />
           <span className="text-[#2F7D78] font-semibold">{pageTitle}</span>
-        </div>
-      </div>
-
-      {/* Header Actions */}
-      <div className="flex items-center gap-3">
-        <Link
-          href="/patient/documents"
-          aria-label="Notifications & Pending Documents"
-          className="relative p-2 rounded-lg text-[#64748B] hover:bg-[#F3F6F9] hover:text-[#111827] transition-colors"
-        >
-          <Bell className="w-5 h-5" />
-          {pendingDocuments.length > 0 && (
-            <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-[#F59E0B] text-white font-mono text-[10px] flex items-center justify-center font-bold">
-              {pendingDocuments.length}
-            </span>
-          )}
-        </Link>
-
-        {/* <button
-          onClick={() => router.push("/upload")}
-          className="h-9 px-4 rounded-lg bg-[#2F7D78] text-white hover:bg-[#256B66] transition-all flex items-center gap-1.5 shadow-sm font-medium text-[13px] cursor-pointer"
-          type="button"
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span>+ Upload Medical Record</span>
-        </button> */}
-
-        <div
-          title={userData?.name || "Patient Profile"}
-          className="w-8 h-8 rounded-full bg-[#2F7D78] text-white flex items-center justify-center shrink-0 text-xs font-semibold cursor-pointer shadow-xs ml-1"
-        >
-          {userInitials}
         </div>
       </div>
     </header>

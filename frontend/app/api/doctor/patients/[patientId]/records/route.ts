@@ -68,18 +68,20 @@ export async function GET(
       requested_at: string;
       responded_at: string | null;
       revoked_at: string | null;
+      expires_at: string | null;
     }>(
-      `SELECT id, status, requested_at, responded_at, revoked_at
+      `SELECT id, status, requested_at, responded_at, revoked_at, expires_at
        FROM patient_access_requests
        WHERE doctor_id = $1 AND patient_id = $2 AND status = 'APPROVED'
+         AND (expires_at IS NULL OR expires_at > NOW())
        LIMIT 1;`,
       [doctor.id, patient.id]
     );
 
     if (accessRows.length === 0) {
-      // Check if there is a pending, rejected, or revoked request to give precise clinical context
-      const anyAccess = await query<{ status: string }>(
-        `SELECT status
+      // Check if there is an expired or otherwise non-active request to give precise clinical context
+      const anyAccess = await query<{ status: string; expires_at: string | null }>(
+        `SELECT status, expires_at
          FROM patient_access_requests
          WHERE doctor_id = $1 AND patient_id = $2
          ORDER BY id DESC
@@ -87,12 +89,16 @@ export async function GET(
         [doctor.id, patient.id]
       );
 
-      const latestStatus = anyAccess[0]?.status || 'NOT_REQUESTED';
+      const latestReq = anyAccess[0];
+      const isExpired = latestReq?.status === 'APPROVED' && latestReq.expires_at && new Date(latestReq.expires_at) <= new Date();
+      const latestStatus = isExpired ? 'EXPIRED' : latestReq?.status || 'NOT_REQUESTED';
 
       return NextResponse.json(
         {
           error:
-            latestStatus === 'REVOKED'
+            isExpired
+              ? `Forbidden: Clinical access has expired (auto-revoked on ${new Date(latestReq.expires_at!).toLocaleDateString()}). Please request updated patient consent.`
+              : latestStatus === 'REVOKED'
               ? 'Forbidden: Patient has revoked your authorization to access medical records.'
               : latestStatus === 'PENDING'
               ? 'Forbidden: Access request is pending patient approval.'
@@ -168,9 +174,26 @@ export async function GET(
         }
       }
 
+      let resolvedImageUrl: string | null = null;
+      if (typeof sr.image_url === 'string' && sr.image_url.trim()) {
+        resolvedImageUrl = sr.image_url.trim();
+      } else if (typeof doc.storedFilename === 'string' && doc.storedFilename.trim()) {
+        const sf = doc.storedFilename.trim();
+        if (sf.startsWith('http://') || sf.startsWith('https://') || sf.startsWith('/uploads/')) {
+          resolvedImageUrl = sf;
+        } else {
+          resolvedImageUrl = `https://dvydfsahkqzgluusdsnn.supabase.co/storage/v1/object/public/OCR_Images/uploads/${sf}`;
+        }
+      } else if (typeof doc.filePath === 'string' && (doc.filePath.startsWith('http://') || doc.filePath.startsWith('https://') || doc.filePath.startsWith('/uploads/'))) {
+        resolvedImageUrl = doc.filePath.trim();
+      }
+
       return {
         id: doc.id,
         originalName: doc.originalName,
+        storedFilename: doc.storedFilename,
+        filePath: doc.filePath,
+        imageUrl: resolvedImageUrl,
         documentType: doc.documentType,
         status: doc.status,
         clinicalVerification: isConfirmed ? 'Clinician Confirmed' : 'OCR Draft (Unconfirmed)',
@@ -186,6 +209,7 @@ export async function GET(
           vitals: sr.vitals || [],
           diagnoses: sr.diagnoses || [],
           notes: sr.notes || '',
+          imageUrl: resolvedImageUrl,
         },
       };
     });
@@ -377,9 +401,10 @@ export async function GET(
     }>(
       `SELECT basic_info, conditions, custom_conditions, history
        FROM patient_onboarding
-       WHERE user_id = $1
+       WHERE user_id = $1 OR patient_id = ANY($2::text[])
+       ORDER BY id DESC
        LIMIT 1;`,
-      [patient.id]
+      [patient.id, patientIds]
     );
 
     const onboarding = onboardingRows[0] || null;

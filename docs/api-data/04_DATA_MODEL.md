@@ -387,9 +387,43 @@ Tracks doctor-to-patient consent requests, approvals, rejections, and revocation
 | `requested_at` | `VARCHAR(64)` | Yes | ISO timestamp when request was initiated |
 | `responded_at` | `VARCHAR(64)` | Yes | ISO timestamp when patient approved or rejected |
 | `revoked_at` | `VARCHAR(64)` | Yes | ISO timestamp when patient revoked access |
-| `expires_at` | `VARCHAR(64)` | Yes | Optional authorization expiration timestamp |
+| `expires_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Expiration timestamp for automatic access revocation |
+| `duration_days` | `INTEGER` | Yes | Pre-selected auto-revoke duration in days (3, 8, 30 days) |
 
 ---
+
+## Patient Demographics Table (Profile & Clinical Background)
+
+Table: `patient_demographics` (snake_case, managed in PostgreSQL).  
+Maintains detailed personal, emergency contact, chronic condition, and auto-revoke governance preferences, kept synchronized with `patient_onboarding`.
+
+| Column | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `SERIAL PRIMARY KEY` | No | Unique record ID |
+| `user_id` | `INTEGER UNIQUE NOT NULL` | No | Associated `User.id` |
+| `patient_id` | `VARCHAR(64)` | Yes | Canonical patient identifier (`P-...`) |
+| `name` | `VARCHAR(255)` | Yes | Full legal name |
+| `email` | `VARCHAR(255)` | Yes | Contact email |
+| `age` | `INTEGER` | Yes | Age in years |
+| `gender` | `VARCHAR(50)` | Yes | Biological sex / gender (`Male`, `Female`, `Other`) |
+| `blood_group` | `VARCHAR(20)` | Yes | Blood type (`A+`, `O+`, `B+`, `AB+`, etc.) |
+| `dob` | `VARCHAR(50)` | Yes | Date of birth |
+| `occupation` | `VARCHAR(255)` | Yes | Occupation details |
+| `marital_status` | `VARCHAR(100)` | Yes | Marital status |
+| `nationality` | `VARCHAR(100)` | Yes | Nationality |
+| `phone` | `VARCHAR(50)` | Yes | Primary contact phone number |
+| `emergency_name` | `VARCHAR(255)` | Yes | Emergency contact name |
+| `emergency_phone` | `VARCHAR(50)` | Yes | Emergency contact phone number |
+| `address` | `TEXT` | Yes | Street / residential address |
+| `city` | `VARCHAR(100)` | Yes | City |
+| `state` | `VARCHAR(100)` | Yes | State / province |
+| `pincode` | `VARCHAR(20)` | Yes | Postal PIN code |
+| `conditions` | `JSONB` | Yes | Structured chronic conditions (`hasDiabetes`, `hasHypertension`, etc.) |
+| `custom_conditions` | `JSONB` | Yes | Custom logged conditions array |
+| `history` | `JSONB` | Yes | Surgical, allergy, smoking, alcohol, and family history |
+| `default_auto_revoke_days`| `INTEGER` | Yes | Global default auto-revoke duration preference (3, 8, or 30 days) |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Record creation timestamp |
+| `updated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Last update timestamp |
 
 ## PLANNED — Future Tables
 

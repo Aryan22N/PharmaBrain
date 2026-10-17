@@ -8,6 +8,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-17 — Automated Doctor Consent Expiration, Patient Profile Demographics Sync & Layout Polish:
+  - **Clinical Consent Governance & Automated Expiration**:
+    - Enhanced `/patient/sharing` with a modernized 2-column layout and 4 real-time KPI metrics (Active Doctors, Pending Requests, Default Policy, Revocation History) queried directly from Supabase PostgreSQL without mock data.
+    - Implemented configurable auto-revocation policy selector: 3 Days (Rapid / Urgent Care), 8 Days (Standard Follow-up / Recommended), and 30 Days (Extended / Comprehensive Care).
+    - Added database schema columns `duration_days` and `expires_at` to `patient_access_requests`.
+    - Automated server-side expiration checks on query (`expires_at <= NOW()`) and dynamic duration adjustment via `PATCH /api/patient/access-requests/[id]/duration`.
+    - Enforced strict 403 Forbidden clinical dossier locks on `GET /api/doctor/patients/[patientId]/records` when authorization expires or is revoked.
+  - **Bi-directional Patient Profile Demographics Synchronization**:
+    - Added `patient_demographics` table with full personal, contact, address, emergency details, and `default_auto_revoke_days`.
+    - Implemented bidirectional synchronization between `patient_onboarding`, `patient_demographics`, and `"User"` records across `POST /api/user/onboarding`, `GET /api/user/profile`, and `PUT /api/user/profile`.
+    - Enriched `GET /api/user/dashboard` to serve live synced demographics to Overview and Settings, eliminating blank fields.
+  - **Patient Layout & UI Cleanliness**:
+    - Streamlined `frontend/app/patient/layout.tsx` top header by removing placeholder notification bell icon and avatar circle.
+    - Preserved existing font styling and design tokens across all patient views.
+
 - 2026-10-13 — Made duplicate prescription uploads resume from saved OCR when structuring failed, return existing extractions idempotently, serialize structuring per OCR row, bound Gemini HTTP attempts, refreshed model candidates, and stopped printing the backend API token at startup.
 - 2026-10-13 — Fixed the prescription timeline migration to reference the quoted camelCase `Document."filePath"` column used by the application schema.
 - 2026-10-13 — Made prescription timeline confirmation idempotent with stable extraction/document references and a unique database index, merged document and event rows by prescription identity (preserving distinct same-date prescriptions), repaired mirrors on already-confirmed retries, and refreshed no-store timeline state on entry and after confirmation.

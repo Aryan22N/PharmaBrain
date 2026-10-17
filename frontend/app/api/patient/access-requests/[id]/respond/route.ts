@@ -64,7 +64,27 @@ export async function POST(
     }
 
     const targetStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    // Auto-revoke expiration calculation (default to 8 days if not specified or invalid)
+    let durationDays: number | null = null;
+    let expiresAtIso: string | null = null;
+
+    if (decision === 'APPROVE') {
+      const parsedDays = Number(body.durationDays);
+      // Valid durations are typically 3, 8, 30, or custom positive number
+      durationDays = [3, 8, 30].includes(parsedDays) ? parsedDays : parsedDays > 0 ? parsedDays : 8;
+      const expiryDate = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+      expiresAtIso = expiryDate.toISOString();
+    }
+
+    try {
+      await query(`ALTER TABLE patient_access_requests ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;`);
+      await query(`ALTER TABLE patient_access_requests ADD COLUMN IF NOT EXISTS duration_days INT DEFAULT 8;`);
+    } catch {
+      // Ignore if columns exist
+    }
 
     const updated = await query<{
       id: number;
@@ -73,20 +93,24 @@ export async function POST(
       doctor_code: string;
       status: string;
       responded_at: string;
+      expires_at: string | null;
+      duration_days: number | null;
     }>(
       `UPDATE patient_access_requests
        SET status = $1,
-           responded_at = $2
-       WHERE id = $3 AND patient_id = $4
-       RETURNING id, doctor_id, doctor_name, doctor_code, status, responded_at;`,
-      [targetStatus, now, requestId, patient.id]
+           responded_at = $2,
+           expires_at = $3,
+           duration_days = $4
+       WHERE id = $5 AND patient_id = $6
+       RETURNING id, doctor_id, doctor_name, doctor_code, status, responded_at, expires_at, duration_days;`,
+      [targetStatus, nowIso, expiresAtIso, durationDays, requestId, patient.id]
     );
 
     return NextResponse.json({
       success: true,
       message:
         decision === 'APPROVE'
-          ? `Access granted to ${existing[0].doctor_name}. The doctor is now authorized to review your medical dossier.`
+          ? `Access granted to ${existing[0].doctor_name} for ${durationDays} days. Access will automatically revoke on ${new Date(expiresAtIso!).toLocaleDateString()}.`
           : `Access request from ${existing[0].doctor_name} was declined.`,
       request: updated[0],
     });

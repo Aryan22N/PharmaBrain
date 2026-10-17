@@ -1,8 +1,8 @@
 ---
 Title: Security & Privacy
 Purpose: Data classification, PII handling, auth, encryption, compliance, and gaps
-Last verified against code: 2026-10-07
-Code version: no git
+Last verified against code: 2026-10-17
+Code version: 2026-10-17
 Owner: TBD
 ---
 
@@ -95,6 +95,33 @@ Owner: TBD
 
 - Row-Level Security (RLS) is enabled in Supabase on `"User"`, `"Document"`, `"Analysis"`, `confirmed_prescriptions`, `observations`, `raw_ocr`, `extractions`. Policies grant full access via service role (backend). Direct user-level RLS policies are not implemented — application-level isolation via JWT `patient_id` is the current control.
 - End-to-end auth isolation is tested in `scratch/test_e2e_auth_isolation.py`.
+
+---
+
+## Clinical Consent Governance & Automated Revocation Engine
+
+- **Patient-Centric Consent Control**: Under Indian DPDPA & HIPAA-inspired privacy guidelines, patients possess granular sovereignty over their medical dossiers via `/patient/sharing`. Practitioners cannot view clinical history without explicit, active consent.
+- **Configurable Auto-Revoke Policy**:
+  - When approving practitioner access or updating an existing authorization, patients choose an expiration window:
+    - **Short Term (3 Days)**: Rapid / urgent care visits and single second opinions.
+    - **Recommended (8 Days)**: Standard acute recovery, lab report analysis, and routine prescription follow-ups.
+    - **Extended (30 Days)**: Comprehensive care, chronic condition monitoring, post-operative healing.
+  - The database records `duration_days` and computes `expires_at = NOW() + INTERVAL 'X days'`.
+  - Default policy preference is saved in `patient_demographics.default_auto_revoke_days`.
+- **Server-Side Expiration Enforcement**:
+  - `GET /api/patient/access-requests` proactively marks expired records:
+    ```sql
+    UPDATE patient_access_requests
+    SET status = 'REVOKED', revoked_at = NOW()
+    WHERE status = 'APPROVED' AND expires_at IS NOT NULL AND expires_at <= NOW();
+    ```
+  - `GET /api/doctor/patients/[patientId]/records` validates that an approved authorization row exists, that `revoked_at IS NULL`, and that `(expires_at IS NULL OR expires_at > NOW())`. If the permission has expired, the doctor is immediately returned `HTTP 403 Forbidden` (`"Access expired or revoked by patient."`).
+- **Dynamic In-Flight Extension & Instant Revocation**:
+  - Patients can dynamically alter the active duration window via `PATCH /api/patient/access-requests/[id]/duration` without needing the doctor to re-request access.
+  - Patients can invoke instant, zero-delay revocation via `POST /api/patient/access-requests/[id]/revoke` at any time.
+- **Patient Demographics Synchronization & Zero Cross-Contamination**:
+  - Demographics are managed via `patient_demographics` and synchronized bidirectionally with `patient_onboarding` and the root `"User"` record during onboarding (`POST /api/user/onboarding`) and settings updates (`PUT /api/user/profile`).
+  - Demographic queries are bound strictly to verified user IDs (`user_id = $1`), completely isolated from other patient accounts.
 
 ---
 

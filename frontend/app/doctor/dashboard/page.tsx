@@ -48,6 +48,64 @@ interface AuthorizationInfo {
 
 type LookupState = "idle" | "loading" | "invalid-id" | "not-found" | "unauthorized" | "success" | "error";
 
+/* ---------- UI-only helpers (no business logic) ---------- */
+
+const FONT_IMPORT =
+  "@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap');";
+
+const serif = { fontFamily: "'Source Serif 4', Georgia, serif" } as const;
+const mono = { fontFamily: "'IBM Plex Mono', ui-monospace, monospace" } as const;
+
+const TONES = {
+  amber: { box: "bg-[#FBF3DF] border-[#E8D49A]", icon: "text-[#8A5A00]", title: "text-[#5E3D00]", text: "text-[#6F4B08]" },
+  red: { box: "bg-[#FBE9E7] border-[#EAB8B2]", icon: "text-[#A32A2A]", title: "text-[#7A1F1F]", text: "text-[#8A2B2B]" },
+  slate: { box: "bg-white border-[#D9DDD6]", icon: "text-[#5F6B72]", title: "text-[#12202B]", text: "text-[#5F6B72]" },
+} as const;
+
+function Notice({
+  tone,
+  icon,
+  title,
+  children,
+  action,
+}: {
+  tone: keyof typeof TONES;
+  icon: React.ReactNode;
+  title: string;
+  children?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  const t = TONES[tone];
+  return (
+    <div className={`rounded-md border-l-4 border ${t.box} p-4 flex items-start justify-between gap-4`}>
+      <div className="flex items-start gap-3">
+        <span className={`${t.icon} mt-0.5 shrink-0`}>{icon}</span>
+        <div>
+          <h3 className={`text-sm font-semibold ${t.title}`}>{title}</h3>
+          <p className={`text-sm mt-0.5 leading-relaxed ${t.text}`}>{children}</p>
+        </div>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    APPROVED: "bg-[#DDEFE9] text-[#0F5A4A]",
+    PENDING: "bg-[#FBF3DF] text-[#6F4B08]",
+    REVOKED: "bg-[#FBE9E7] text-[#8A2B2B]",
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${map[status] || "bg-[#ECEEEA] text-[#3B464D]"}`}>
+      {status === "APPROVED" && <CheckCircle2 className="w-3.5 h-3.5" />}
+      {status === "PENDING" && <Clock className="w-3.5 h-3.5" />}
+      {status === "REVOKED" && <XCircle className="w-3.5 h-3.5" />}
+      {status.charAt(0) + status.slice(1).toLowerCase()}
+    </span>
+  );
+}
+
 export default function DoctorDashboardPage() {
   const router = useRouter();
   const [doctorUser, setDoctorUser] = useState<UserAccount | null>(null);
@@ -142,7 +200,7 @@ export default function DoctorDashboardPage() {
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
-    } catch {}
+    } catch { }
     localStorage.removeItem("auth_token");
     localStorage.removeItem("user");
     router.replace("/auth");
@@ -294,40 +352,42 @@ export default function DoctorDashboardPage() {
     setRequestSuccessMessage(null);
   };
 
+  /* ---------- Loading / session error screens ---------- */
+
   if (initialLoading) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex flex-col items-center justify-center p-4">
-        <div className="w-12 h-12 border-4 border-[#2F7D78] border-t-transparent rounded-full animate-spin mb-4" />
-        <h2 className="text-lg font-bold text-[#0F172A]">Loading Doctor Portal...</h2>
-        <p className="text-sm text-[#64748B] mt-1">Verifying clinical credentials & directory access</p>
+      <div className="min-h-screen bg-[#F4F5F2] flex flex-col items-center justify-center p-4" style={{ fontFamily: "'IBM Plex Sans', system-ui, sans-serif" }}>
+        <style>{FONT_IMPORT}</style>
+        <div className="w-10 h-10 border-[3px] border-[#17635E] border-t-transparent rounded-full animate-spin mb-5" />
+        <h2 className="text-xl text-[#12202B]" style={serif}>Opening your portal</h2>
+        <p className="text-sm text-[#5F6B72] mt-1">Checking your credentials and directory access.</p>
       </div>
     );
   }
 
   if (sessionError && !doctorUser) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white border border-[#FECACA] rounded-2xl p-8 shadow-xs text-center space-y-4">
-          <div className="w-12 h-12 rounded-xl bg-[#FEF2F2] text-[#DC2626] mx-auto flex items-center justify-center">
-            <AlertCircle className="w-6 h-6" />
+      <div className="min-h-screen bg-[#F4F5F2] flex flex-col items-center justify-center p-4" style={{ fontFamily: "'IBM Plex Sans', system-ui, sans-serif" }}>
+        <style>{FONT_IMPORT}</style>
+        <div className="max-w-md w-full bg-white border border-[#D9DDD6] rounded-lg p-8">
+          <div className="w-10 h-10 rounded-md bg-[#FBE9E7] text-[#A32A2A] flex items-center justify-center mb-4">
+            <AlertCircle className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-[#0F172A]">Unable to Load Doctor Portal</h2>
-            <p className="text-xs text-[#64748B] mt-1 leading-relaxed">{sessionError}</p>
-          </div>
-          <div className="pt-2 flex items-center justify-center gap-3">
-            <button
-              onClick={() => router.push("/auth/doctor/login")}
-              className="px-4 py-2 bg-white hover:bg-[#F1F5F9] border border-[#DCE4ED] text-[#334155] rounded-xl text-xs font-semibold transition-colors"
-            >
-              Sign In Again
-            </button>
+          <h2 className="text-xl text-[#12202B]" style={serif}>We couldn’t open the doctor portal</h2>
+          <p className="text-sm text-[#5F6B72] mt-2 leading-relaxed">{sessionError}</p>
+          <div className="mt-6 flex items-center gap-3">
             <button
               onClick={fetchDoctorSession}
-              className="px-4 py-2 bg-[#2F7D78] hover:bg-[#256B66] text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 bg-[#17635E] hover:bg-[#0F4F4B] text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#17635E]"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Retry</span>
+              <RotateCcw className="w-4 h-4" />
+              <span>Try again</span>
+            </button>
+            <button
+              onClick={() => router.push("/auth/doctor/login")}
+              className="px-4 py-2 border border-[#C5CBC3] hover:bg-[#F4F5F2] text-[#12202B] rounded-md text-sm font-medium transition-colors"
+            >
+              Sign in again
             </button>
           </div>
         </div>
@@ -342,486 +402,369 @@ export default function DoctorDashboardPage() {
   const specialty = doctorUser?.specialization || "General Medicine";
   const hospital = doctorUser?.hospitalAffiliation || "Affiliated Hospital";
 
+  const approvedCount = recentRequests.filter((r) => r.status === "APPROVED").length;
+  const pendingCount = recentRequests.filter((r) => r.status === "PENDING").length;
+
   return (
-    <div className="min-h-screen bg-[#F7F9FB] text-[#0F172A] font-sans antialiased flex flex-col">
-      {/* Top Clinical Header */}
-      <header className="bg-white border-b border-[#DCE4ED] sticky top-0 z-30 h-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between gap-4">
+    <div
+      className="min-h-screen bg-[#F4F5F2] text-[#12202B] antialiased flex flex-col"
+      style={{ fontFamily: "'IBM Plex Sans', system-ui, sans-serif" }}
+    >
+      <style>{FONT_IMPORT}</style>
+
+      {/* Header */}
+      <header className="bg-white border-b border-[#D9DDD6] sticky top-0 z-30 h-14">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-full flex items-center justify-between gap-4">
+          <Link href="/doctor/dashboard" className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-md bg-[#17635E] text-white flex items-center justify-center">
+              <Stethoscope className="w-[18px] h-[18px]" />
+            </span>
+            <span className="text-lg text-[#12202B]" style={serif}>Patient-Centric DMR</span>
+          </Link>
+
           <div className="flex items-center gap-4">
-            <Link href="/doctor/dashboard" className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-[#2F7D78] text-white flex items-center justify-center shadow-xs">
-                <Stethoscope className="w-5 h-5 stroke-[2.2]" />
-              </div>
-              <span className="font-semibold text-base text-[#2F7D78] tracking-tight">
-                Patient-Centric DMR
-              </span>
-            </Link>
-
-            <div className="hidden sm:flex items-center bg-[#F1F5F9] p-1 rounded-lg border border-[#DCE4ED]">
-              <span className="px-2.5 py-1 rounded bg-white text-xs font-semibold text-[#2F7D78] shadow-xs">
-                Doctor Portal
-              </span>
-              <Link
-                href="/patient/overview"
-                className="px-2.5 py-1 rounded text-xs font-medium text-[#64748B] hover:text-[#0F172A] transition-colors"
-              >
-                Patient Portal
-              </Link>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden md:block">
-              <p className="text-xs font-bold text-[#0F172A]">{doctorName}</p>
-              <p className="text-[11px] font-mono text-[#2F7D78] font-medium">{doctorId}</p>
+            <div className="text-right hidden md:block leading-tight">
+              <p className="text-sm font-medium">{doctorName}</p>
+              <p className="text-xs text-[#17635E]" style={mono}>{doctorId}</p>
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#DCE4ED] text-xs font-semibold text-[#334155] hover:bg-[#F1F5F9] hover:text-[#0F172A] transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-[#C5CBC3] text-sm font-medium text-[#12202B] hover:bg-[#F4F5F2] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#17635E]"
             >
-              <LogOut className="w-3.5 h-3.5 text-[#64748B]" />
-              <span>Sign Out</span>
+              <LogOut className="w-4 h-4 text-[#5F6B72]" />
+              <span>Sign out</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Doctor Profile Banner Card */}
-        <section className="bg-white rounded-xl p-6 sm:p-7 border border-[#DCE4ED] shadow-xs relative overflow-hidden">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-            <div className="flex items-start gap-4">
-              <div className="w-16 h-16 rounded-xl bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center shrink-0 shadow-xs">
-                <Stethoscope className="w-8 h-8 stroke-[2.2]" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#0F172A]">{doctorName}</h1>
-                  <span
-                    className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
-                      isPendingVerification
-                        ? "bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]"
-                        : "bg-[#E8F6F4] text-[#2F7D78] border-[#A7E9DF]"
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
+        {/* Practitioner profile */}
+        <section>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <div>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-3xl sm:text-4xl tracking-tight" style={serif}>{doctorName}</h1>
+                <span
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${isPendingVerification ? "bg-[#FBF3DF] text-[#6F4B08]" : "bg-[#DDEFE9] text-[#0F5A4A]"
                     }`}
-                  >
-                    <Clock className="w-3 h-3" />
-                    {isPendingVerification ? "Verification Pending" : "Verified Practitioner"}
-                  </span>
-                </div>
-
-                <p className="text-xs sm:text-sm text-[#64748B] font-medium flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <span className="flex items-center gap-1">
-                    <Award className="w-3.5 h-3.5 text-[#2F7D78]" />
-                    {specialty}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Building2 className="w-3.5 h-3.5 text-[#2F7D78]" />
-                    {hospital}
-                  </span>
-                  <span className="flex items-center gap-1 text-[#475569]">
-                    <IdCard className="w-3.5 h-3.5 text-[#2F7D78]" />
-                    Reg No: <span className="font-mono">{licenseNumber}</span>
-                  </span>
-                </p>
+                >
+                  {isPendingVerification ? <Clock className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                  {isPendingVerification ? "Verification pending" : "Verified practitioner"}
+                </span>
               </div>
+              <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm text-[#5F6B72]">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4 h-4 text-[#17635E]" />
+                  <dt className="sr-only">Specialty</dt>
+                  <dd>{specialty}</dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-[#17635E]" />
+                  <dt className="sr-only">Hospital</dt>
+                  <dd>{hospital}</dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <IdCard className="w-4 h-4 text-[#17635E]" />
+                  <dt>Reg. no.</dt>
+                  <dd className="text-[#12202B]" style={mono}>{licenseNumber}</dd>
+                </div>
+              </dl>
             </div>
 
-            {/* Persistent Doctor ID Card */}
-            <div className="bg-[#F7F9FB] border border-[#DCE4ED] rounded-xl p-3.5 flex flex-col justify-between shrink-0 min-w-56">
-              <div className="flex items-center justify-between text-xs text-[#64748B] mb-1">
-                <span className="font-bold uppercase tracking-wider text-[10px] text-[#2F7D78]">
-                  Doctor Identifier
-                </span>
-                <span className="text-[10px] bg-[#E8F6F4] text-[#2F7D78] px-1.5 py-0.5 rounded font-mono font-semibold">
-                  Permanent
-                </span>
+            <div className="flex items-center gap-3 border border-[#D9DDD6] bg-white rounded-md pl-4 pr-2 py-2 self-start md:self-auto">
+              <div className="leading-tight">
+                <p className="text-xs text-[#5F6B72]">Your doctor ID</p>
+                <p className="text-lg font-semibold" style={mono}>{doctorId}</p>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-lg font-mono font-extrabold tracking-wide text-[#0F172A]">{doctorId}</span>
-                <button
-                  onClick={handleCopyDoctorId}
-                  title="Copy Doctor ID"
-                  className="p-1.5 rounded-lg bg-white hover:bg-[#E8F6F4] text-[#2F7D78] border border-[#DCE4ED] transition-colors"
-                >
-                  {copiedDoctorId ? <Check className="w-4 h-4 text-[#2F7D78]" /> : <Copy className="w-4 h-4" />}
-                </button>
-              </div>
+              <button
+                onClick={handleCopyDoctorId}
+                title="Copy doctor ID"
+                aria-label="Copy doctor ID"
+                className="p-2 rounded-md hover:bg-[#E3EFEC] text-[#17635E] transition-colors focus-visible:outline-2 focus-visible:outline-[#17635E]"
+              >
+                {copiedDoctorId ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
-          {/* Pending verification advisory banner */}
           {isPendingVerification && (
-            <div className="mt-6 pt-4 border-t border-[#DCE4ED] flex items-start gap-2.5 text-xs text-[#92400E] bg-[#FFFBEB] rounded-xl p-3 border border-[#FDE68A]">
-              <AlertCircle className="w-4 h-4 text-[#92400E] shrink-0 mt-0.5" />
-              <p>
-                <strong className="text-[#0F172A]">Credentials Review Pending:</strong> Your account registration has been
-                recorded. State Medical Council validation is currently processing. You can request patient access; full
-                clinical record review requires confirmed patient consent.
-              </p>
+            <div className="mt-5">
+              <Notice tone="amber" icon={<AlertCircle className="w-5 h-5" />} title="Credential review in progress">
+                Your registration is recorded and the State Medical Council is validating it. You can request patient
+                access now, but viewing full records still needs the patient’s consent.
+              </Notice>
             </div>
           )}
         </section>
 
-        {/* Practice KPI Summary Cards (dynamically computed from real database records) */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Active Consultations</p>
-              <h3 className="text-2xl font-bold text-[#0F172A] mt-1">
-                {recentRequests.filter((r) => r.status === "APPROVED").length}
-              </h3>
-              <p className="text-[11px] text-[#2F7D78] font-medium mt-0.5">Authorized medical records accessible</p>
+        {/* Practice summary: one strip, not three cards */}
+        <section className="grid grid-cols-1 sm:grid-cols-3 bg-white border border-[#D9DDD6] rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-[#D9DDD6]">
+          {[
+            { label: "Active consultations", value: approvedCount, note: "Records you can open", icon: <CheckCircle2 className="w-5 h-5 text-[#17635E]" /> },
+            { label: "Awaiting patient consent", value: pendingCount, note: "Requests not yet answered", icon: <Clock className="w-5 h-5 text-[#8A5A00]" /> },
+            { label: "Access requests sent", value: recentRequests.length, note: "All logged for audit", icon: <FileText className="w-5 h-5 text-[#5F6B72]" /> },
+          ].map((s) => (
+            <div key={s.label} className="p-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-[#5F6B72]">{s.label}</p>
+                <p className="text-4xl mt-1 leading-none" style={serif}>{s.value}</p>
+                <p className="text-xs text-[#5F6B72] mt-2">{s.note}</p>
+              </div>
+              {s.icon}
             </div>
-            <div className="w-11 h-11 rounded-xl bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-6 h-6" />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Pending Authorizations</p>
-              <h3 className="text-2xl font-bold text-[#0F172A] mt-1">
-                {recentRequests.filter((r) => r.status === "PENDING").length}
-              </h3>
-              <p className="text-[11px] text-[#92400E] font-medium mt-0.5">Awaiting patient consent response</p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-[#FFFBEB] text-[#92400E] flex items-center justify-center shrink-0">
-              <Clock className="w-6 h-6" />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Total Directory Queries</p>
-              <h3 className="text-2xl font-bold text-[#0F172A] mt-1">
-                {recentRequests.length}
-              </h3>
-              <p className="text-[11px] text-[#64748B] font-medium mt-0.5">Audit-logged patient access requests</p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-[#F1F5F9] text-[#475569] flex items-center justify-center shrink-0">
-              <FileText className="w-6 h-6" />
-            </div>
-          </div>
+          ))}
         </section>
 
-        {/* Patient Lookup Section */}
-        <section className="bg-white rounded-xl border border-[#DCE4ED] shadow-xs overflow-hidden">
-          <div className="p-6 border-b border-[#DCE4ED]">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center">
-                <Search className="w-4 h-4 stroke-[2.2]" />
-              </div>
-              <h2 className="text-lg font-bold text-[#0F172A]">Patient Directory Lookup</h2>
-            </div>
-            <p className="text-xs text-[#64748B]">
-              Query registered patient accounts by their official permanent identifier starting with{" "}
-              <code className="bg-[#F1F5F9] text-[#0F172A] border border-[#DCE4ED] px-1 py-0.5 rounded font-mono font-bold">P-</code> to review
-              identity and request consent.
+        {/* Patient lookup: the one bold element */}
+        <section className="rounded-lg overflow-hidden border border-[#D9DDD6] bg-white">
+          <div className="bg-[#0F2E2C] text-white p-6 sm:p-8">
+            <h2 className="text-2xl sm:text-3xl tracking-tight" style={serif}>Find a patient</h2>
+            <p className="text-sm text-[#B8D3CF] mt-1.5 max-w-xl leading-relaxed">
+              Enter the patient’s permanent ID (it starts with <span style={mono}>P-</span>) to confirm who they are and
+              ask for access to their records.
             </p>
-          </div>
 
-          {/* Lookup Input Form */}
-          <div className="p-6 bg-[#F8FAFC]">
-            <form onSubmit={handleLookupPatient} className="max-w-2xl space-y-4">
-              <div>
-                <label htmlFor="patientId" className="block text-xs font-bold text-[#0F172A] mb-1.5">
-                  Patient ID <span className="text-[#DC2626]">*</span>
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <div className="relative flex-1">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#94A3B8]">
-                      <IdCard className="w-4 h-4" />
-                    </div>
-                    <input
-                      id="patientId"
-                      type="text"
-                      value={patientIdInput}
-                      onChange={(e) => setPatientIdInput(e.target.value)}
-                      placeholder="e.g. P-829017616"
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-[#DCE4ED] rounded-xl text-sm font-mono text-[#0F172A] placeholder:text-[#94A3B8] placeholder:font-sans focus:outline-hidden focus:ring-2 focus:ring-[#2F7D78] focus:border-transparent transition-all shadow-xs uppercase"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="submit"
-                      disabled={lookupState === "loading"}
-                      className="w-full sm:w-auto px-5 py-2.5 bg-[#2F7D78] hover:bg-[#256B66] disabled:bg-[#2F7D78]/60 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-xs"
-                    >
-                      {lookupState === "loading" ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Searching...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Search className="w-4 h-4" />
-                          <span>Search Patient</span>
-                        </>
-                      )}
-                    </button>
-
-                    {lookupState !== "idle" && (
-                      <button
-                        type="button"
-                        onClick={handleResetLookup}
-                        className="px-3 py-2.5 bg-white hover:bg-[#F1F5F9] border border-[#DCE4ED] text-[#475569] rounded-xl text-xs font-medium transition-colors"
-                        title="Clear search"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
+            <form onSubmit={handleLookupPatient} className="mt-6 max-w-2xl">
+              <label htmlFor="patientId" className="block text-sm font-medium mb-2">Patient ID</label>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <IdCard className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-[#6B8E8A] pointer-events-none" />
+                  <input
+                    id="patientId"
+                    type="text"
+                    value={patientIdInput}
+                    onChange={(e) => setPatientIdInput(e.target.value)}
+                    placeholder="P-829017616"
+                    className="w-full h-12 pl-12 pr-4 bg-white text-[#12202B] rounded-md text-lg uppercase placeholder:text-[#9AA5A3] focus:outline-none focus:ring-2 focus:ring-[#7FD1C7]"
+                    style={mono}
+                  />
                 </div>
-                <p className="text-[11px] text-[#64748B] mt-1.5">
-                  Accepts standard PharmaBrain patient identifiers beginning with <span className="font-mono font-semibold">P-</span>{" "}
-                  (e.g., P-829017616).
-                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={lookupState === "loading"}
+                    className="h-12 flex-1 sm:flex-none px-6 bg-[#7FD1C7] hover:bg-[#9ADED5] disabled:opacity-60 text-[#0F2E2C] text-sm font-semibold rounded-md flex items-center justify-center gap-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                  >
+                    {lookupState === "loading" ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-[#0F2E2C] border-t-transparent rounded-full animate-spin" />
+                        <span>Searching</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4" />
+                        <span>Search patient</span>
+                      </>
+                    )}
+                  </button>
+                  {lookupState !== "idle" && (
+                    <button
+                      type="button"
+                      onClick={handleResetLookup}
+                      className="h-12 w-12 flex items-center justify-center border border-[#3F6561] hover:bg-[#1A433F] text-white rounded-md transition-colors"
+                      title="Clear search"
+                      aria-label="Clear search"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             </form>
           </div>
 
-          {/* Dynamic States Render Container */}
-          <div className="p-6">
-            {/* 1. IDLE STATE */}
+          {/* Results */}
+          <div className="p-6 sm:p-8 bg-[#FAFBF9]">
             {lookupState === "idle" && (
-              <div className="rounded-xl border border-dashed border-[#DCE4ED] p-8 text-center bg-[#F8FAFC]">
-                <div className="w-12 h-12 rounded-full bg-[#E8F6F4] text-[#2F7D78] mx-auto flex items-center justify-center mb-3">
-                  <Search className="w-6 h-6 stroke-[2.2]" />
-                </div>
-                <h3 className="text-sm font-bold text-[#0F172A]">No Patient Queried Yet</h3>
-                <p className="text-xs text-[#64748B] max-w-md mx-auto mt-1">
-                  Enter a valid Patient ID in the search box above to verify identity and check clinical consent status.
-                </p>
-              </div>
+              <p className="text-sm text-[#5F6B72]">
+                Results appear here. You’ll see the patient’s identity and whether you already have their consent.
+              </p>
             )}
 
-            {/* 2. LOADING STATE */}
             {lookupState === "loading" && (
-              <div className="rounded-xl border border-[#A7E9DF] p-8 text-center bg-[#E8F6F4]/40">
-                <div className="w-10 h-10 border-3 border-[#2F7D78] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                <h3 className="text-sm font-bold text-[#0F172A]">Searching Hospital Registry...</h3>
-                <p className="text-xs text-[#2F7D78] mt-1">
-                  Querying verified patient registry for ID:{" "}
-                  <span className="font-mono font-bold text-[#0F172A]">{patientIdInput}</span>
-                </p>
+              <div className="flex items-center gap-3 text-sm text-[#5F6B72]">
+                <div className="w-5 h-5 border-2 border-[#17635E] border-t-transparent rounded-full animate-spin" />
+                <span>
+                  Searching the registry for <span className="text-[#12202B] font-semibold" style={mono}>{patientIdInput}</span>
+                </span>
               </div>
             )}
-            {/* 3. INVALID ID STATE */}
+
             {lookupState === "invalid-id" && (
-              <div className="rounded-xl border border-[#FDE68A] p-5 bg-[#FFFBEB] flex items-start gap-3.5">
-                <AlertTriangle className="w-5 h-5 text-[#D97706] shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-bold text-[#92400E]">Invalid Patient ID Format</h3>
-                  <p className="text-xs text-[#B45309] mt-1 leading-relaxed">
-                    {errorMessage ||
-                      'Patient IDs must begin with "P-" followed by the assigned identification sequence (e.g., P-829017616).'}
-                  </p>
-                </div>
-              </div>
+              <Notice tone="amber" icon={<AlertTriangle className="w-5 h-5" />} title="That ID doesn’t look right">
+                {errorMessage || 'Patient IDs start with "P-" followed by the assigned number, for example P-829017616.'}
+              </Notice>
             )}
 
-            {/* 4. PATIENT NOT FOUND STATE */}
             {lookupState === "not-found" && (
-              <div className="rounded-xl border border-[#DCE4ED] p-5 bg-[#F8FAFC] flex items-start gap-3.5">
-                <AlertCircle className="w-5 h-5 text-[#64748B] shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-bold text-[#0F172A]">Patient Not Found in Directory</h3>
-                  <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-                    {errorMessage ||
-                      `No registered patient record was found matching ID "${patientIdInput}". Please confirm the ID directly with the patient.`}
-                  </p>
-                  <p className="text-[11px] text-[#94A3B8] mt-2 font-medium">
-                    Note: Unregistered individuals must complete patient onboarding before their records can be queried.
-                  </p>
-                </div>
-              </div>
+              <Notice tone="slate" icon={<AlertCircle className="w-5 h-5" />} title="No patient with that ID">
+                {errorMessage || `We couldn’t find "${patientIdInput}". Check the ID with the patient.`} Patients must finish
+                onboarding before their records can be searched.
+              </Notice>
             )}
 
-            {/* 5. UNAUTHORIZED STATE */}
             {lookupState === "unauthorized" && (
-              <div className="rounded-xl border border-[#FECACA] p-5 bg-[#FEF2F2] flex items-start gap-3.5">
-                <Lock className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-bold text-[#991B1B]">Unauthorized Session</h3>
-                  <p className="text-xs text-[#7F1D1D] mt-1 leading-relaxed">
-                    {errorMessage || "You must be signed in with an active Doctor account to perform patient lookups."}
-                  </p>
+              <Notice
+                tone="red"
+                icon={<Lock className="w-5 h-5" />}
+                title="Your session isn’t authorized"
+                action={
                   <button
                     onClick={() => router.push("/auth/doctor/login")}
-                    className="mt-3 px-3.5 py-1.5 bg-[#DC2626] text-white rounded-lg text-xs font-semibold hover:bg-[#B91C1C] transition-colors shadow-xs"
+                    className="shrink-0 px-3.5 py-1.5 bg-[#A32A2A] hover:bg-[#8A2222] text-white rounded-md text-sm font-medium transition-colors"
                   >
-                    Return to Doctor Login
+                    Sign in
                   </button>
-                </div>
-              </div>
+                }
+              >
+                {errorMessage || "Sign in with an active doctor account to search for patients."}
+              </Notice>
             )}
 
-            {/* 6. GENERIC ERROR STATE WITH RETRY */}
             {lookupState === "error" && (
-              <div className="rounded-xl border border-[#FECACA] p-5 bg-[#FEF2F2] flex items-start justify-between gap-3.5">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="text-sm font-bold text-[#991B1B]">Directory Lookup Error</h3>
-                    <p className="text-xs text-[#7F1D1D] mt-1">{errorMessage || "An unexpected error occurred while communicating with the patient directory."}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleLookupPatient}
-                  className="px-3 py-1.5 bg-[#DC2626] hover:bg-[#B91C1C] text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shrink-0"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Retry</span>
-                </button>
-              </div>
+              <Notice
+                tone="red"
+                icon={<AlertCircle className="w-5 h-5" />}
+                title="The search didn’t go through"
+                action={
+                  <button
+                    type="button"
+                    onClick={handleLookupPatient}
+                    className="shrink-0 px-3.5 py-1.5 bg-[#A32A2A] hover:bg-[#8A2222] text-white rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Try again</span>
+                  </button>
+                }
+              >
+                {errorMessage || "Something went wrong reaching the patient directory."}
+              </Notice>
             )}
 
-            {/* 7. SUCCESS STATE (PATIENT FOUND IN REAL DB) */}
             {lookupState === "success" && locatedPatient && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {requestSuccessMessage && (
-                  <div className="rounded-xl border border-[#A7E9DF] bg-[#E8F6F4] p-4 text-xs font-semibold text-[#2F7D78] flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-[#2F7D78] shrink-0" />
+                  <div className="rounded-md bg-[#DDEFE9] text-[#0F5A4A] px-4 py-3 text-sm font-medium flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
                     <span>{requestSuccessMessage}</span>
                   </div>
                 )}
 
-                {/* Patient Identity Confirmation Card */}
-                <div className="rounded-xl border border-[#DCE4ED] bg-white p-5 shadow-xs">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-12 h-12 rounded-xl bg-[#2F7D78] text-white flex items-center justify-center font-bold text-lg shadow-xs shrink-0">
-                        {locatedPatient.name
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")
-                          .toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-base font-bold text-[#0F172A]">{locatedPatient.name}</h3>
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF]">
-                            <ShieldCheck className="w-3 h-3 text-[#2F7D78]" />
-                            Directory Verified
-                          </span>
-                        </div>
-                        <p className="text-xs text-[#64748B] font-mono mt-0.5">
-                          ID: <strong className="text-[#2F7D78]">{locatedPatient.patientId}</strong>
-                          {locatedPatient.legacyPatientId && (
-                            <span className="text-[#94A3B8] ml-2">
-                              (Legacy: {locatedPatient.legacyPatientId})
-                            </span>
-                          )}
-                        </p>
-                      </div>
+                {/* Patient identity */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-full bg-[#17635E] text-white flex items-center justify-center text-lg font-semibold shrink-0" style={serif}>
+                      {locatedPatient.name
+                        .split(" ")
+                        .map((n) => n[0])
+                        .join("")
+                        .toUpperCase()}
                     </div>
-
-                    <div className="text-xs text-slate-500 sm:text-right flex items-center sm:block gap-2">
-                      <span className="text-[11px] font-semibold text-slate-400 block">Registration Timestamp</span>
-                      <span className="flex items-center gap-1 font-mono text-[11px] text-slate-700">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        {new Date(locatedPatient.accountRegisteredAt).toLocaleDateString("en-US", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-2xl leading-tight" style={serif}>{locatedPatient.name}</h3>
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-[#DDEFE9] text-[#0F5A4A]">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          Identity verified
+                        </span>
+                      </div>
+                      <p className="text-sm text-[#5F6B72] mt-1" style={mono}>
+                        <span className="text-[#17635E] font-semibold">{locatedPatient.patientId}</span>
+                        {locatedPatient.legacyPatientId && <span className="ml-3">Legacy {locatedPatient.legacyPatientId}</span>}
+                      </p>
                     </div>
+                  </div>
+                  <div className="text-sm text-[#5F6B72] sm:text-right">
+                    <p>Registered</p>
+                    <p className="flex items-center gap-1.5 sm:justify-end text-[#12202B]">
+                      <Calendar className="w-4 h-4 text-[#5F6B72]" />
+                      {new Date(locatedPatient.accountRegisteredAt).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </p>
                   </div>
                 </div>
 
-                {/* Authorization Status & Action Card */}
+                {/* Consent status */}
                 {authorizationInfo?.hasClinicalAccess ? (
-                  // Authorized State Card
-                  <div className="rounded-xl border border-emerald-200 bg-linear-to-br from-emerald-50 to-teal-50/40 p-6 space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex items-start gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                          <CheckCircle2 className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-bold text-emerald-950">
-                              Clinical Access Authorized by Patient
-                            </h4>
-                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-200 text-emerald-900">
-                              Active
-                            </span>
-                          </div>
-                          <p className="text-xs text-emerald-900/90 mt-1">
-                            {authorizationInfo.message || "You have authorized clinical access to inspect medical history, prescriptions, and longitudinal health trends."}
-                          </p>
-                        </div>
+                  <div className="rounded-md border border-[#9CD3C3] border-l-4 border-l-[#17635E] bg-[#EAF5F1] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="w-6 h-6 text-[#17635E] shrink-0" />
+                      <div>
+                        <h4 className="text-base font-semibold text-[#0C3D36]">
+                          Access granted <span className="font-normal text-[#0F5A4A]">· active</span>
+                        </h4>
+                        <p className="text-sm text-[#0F5A4A] mt-0.5 leading-relaxed">
+                          {authorizationInfo.message ||
+                            "You can review this patient’s medical history, prescriptions and health trends."}
+                        </p>
                       </div>
-
-                      <button
-                        onClick={() => router.push(`/doctor/patients/${locatedPatient.patientId}`)}
-                        className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs shrink-0"
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span>View Patient Medical Dossier</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </button>
                     </div>
+                    <button
+                      onClick={() => router.push(`/doctor/patients/${locatedPatient.patientId}`)}
+                      className="px-5 py-2.5 bg-[#17635E] hover:bg-[#0F4F4B] text-white rounded-md text-sm font-semibold flex items-center justify-center gap-2 transition-colors shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#17635E]"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>Open medical dossier</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 ) : (
-                  // Locked / Pending / Revoked State Card
-                  <div className="rounded-xl border border-amber-200 bg-linear-to-br from-amber-50 to-orange-50/30 p-6 space-y-4">
-                    <div className="flex items-start gap-3.5">
-                      <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0">
-                        <Lock className="w-5 h-5 text-amber-700" />
-                      </div>
+                  <div className="rounded-md border border-[#E8D49A] border-l-4 border-l-[#C58A12] bg-[#FBF3DF] p-5 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <Lock className="w-5 h-5 text-[#8A5A00] shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-sm font-bold text-amber-950">Clinical Medical Information Locked</h4>
+                          <h4 className="text-base font-semibold text-[#5E3D00]">Records are locked</h4>
                           <span
-                            className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${
-                              authorizationInfo?.status === "PENDING"
-                                ? "bg-amber-200 text-amber-900"
-                                : authorizationInfo?.status === "REVOKED"
-                                ? "bg-rose-200 text-rose-900"
-                                : "bg-slate-200 text-slate-800"
-                            }`}
+                            className={`text-xs font-medium px-2 py-0.5 rounded-full ${authorizationInfo?.status === "PENDING"
+                              ? "bg-[#F3DFA6] text-[#5E3D00]"
+                              : authorizationInfo?.status === "REVOKED"
+                                ? "bg-[#F4CBC6] text-[#7A1F1F]"
+                                : "bg-[#E4E7E2] text-[#3B464D]"
+                              }`}
                           >
-                            {authorizationInfo?.status || "Authorization Required"}
+                            {authorizationInfo?.status
+                              ? authorizationInfo.status.charAt(0) + authorizationInfo.status.slice(1).toLowerCase()
+                              : "Consent needed"}
                           </span>
                         </div>
-                        <p className="text-xs text-amber-900/90 mt-1 leading-relaxed">
+                        <p className="text-sm text-[#6F4B08] mt-1 leading-relaxed max-w-2xl">
                           {authorizationInfo?.message ||
-                            "In compliance with healthcare privacy safeguards, prescription records, lab observations, longitudinal trends, and medication timelines remain protected. Clinical data is hidden until patient consent or transfer authorization is verified."}
+                            "Prescriptions, lab results and medication history stay hidden until the patient consents or authorizes a transfer."}
                         </p>
                       </div>
                     </div>
 
-                    <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-amber-200/60">
-                      <span className="text-[11px] text-amber-800 flex items-center gap-1.5 font-medium">
-                        <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                        Protected medical records cannot be accessed without patient authorization.
+                    <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-[#E8D49A]">
+                      <span className="text-sm text-[#6F4B08] flex items-center gap-2">
+                        <ShieldAlert className="w-4 h-4 shrink-0" />
+                        Nothing can be viewed without the patient’s authorization.
                       </span>
 
                       {authorizationInfo?.status === "PENDING" ? (
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold border border-amber-200">
-                          <Clock className="w-3.5 h-3.5 text-amber-700" />
-                          <span>Request Pending Patient Review</span>
+                        <div className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#F3DFA6] text-[#5E3D00] rounded-md text-sm font-medium">
+                          <Clock className="w-4 h-4" />
+                          <span>Waiting for the patient to respond</span>
                         </div>
                       ) : (
                         <button
                           onClick={handleRequestAccess}
                           disabled={requestingAccess}
-                          className="px-4 py-2 bg-amber-700 hover:bg-amber-800 disabled:bg-amber-400 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-2xs"
+                          className="px-5 py-2.5 bg-[#12202B] hover:bg-[#1E3242] disabled:opacity-60 text-white rounded-md text-sm font-semibold flex items-center justify-center gap-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12202B]"
                         >
                           {requestingAccess ? (
                             <>
-                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              <span>Submitting Request...</span>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Sending request</span>
                             </>
                           ) : (
                             <>
-                              <Send className="w-3.5 h-3.5" />
-                              <span>Request Clinical Access</span>
+                              <Send className="w-4 h-4" />
+                              <span>Request access</span>
                             </>
                           )}
                         </button>
@@ -834,109 +777,93 @@ export default function DoctorDashboardPage() {
           </div>
         </section>
 
-        {/* Recent Consultations & Access Requests Panel */}
-        <section className="bg-white rounded-xl border border-[#DCE4ED] shadow-xs overflow-hidden">
-          <div className="p-6 border-b border-[#DCE4ED] flex items-center justify-between">
+        {/* Access requests */}
+        <section>
+          <div className="flex items-end justify-between gap-4 mb-3">
             <div>
-              <h2 className="text-base font-bold text-[#0F172A]">Patient Access Requests & Active Consultations</h2>
-              <p className="text-xs text-[#64748B]">
-                Audit trail of clinical access requests initiated from your doctor account.
-              </p>
+              <h2 className="text-2xl tracking-tight" style={serif}>Your access requests</h2>
+              <p className="text-sm text-[#5F6B72] mt-0.5">Every request you’ve sent, with its current status.</p>
             </div>
             <button
               onClick={fetchRecentRequests}
               disabled={loadingRequests}
-              className="text-xs text-[#2F7D78] hover:text-[#256B66] font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#DCE4ED] hover:bg-[#F1F5F9] transition-colors"
+              className="text-sm text-[#17635E] hover:bg-[#E3EFEC] font-medium flex items-center gap-2 px-3 py-1.5 rounded-md border border-[#C5CBC3] transition-colors"
             >
-              <RotateCcw className={`w-3.5 h-3.5 ${loadingRequests ? "animate-spin" : ""}`} />
+              <RotateCcw className={`w-4 h-4 ${loadingRequests ? "animate-spin" : ""}`} />
               <span>Refresh</span>
             </button>
           </div>
 
-          <div className="p-6">
+          <div className="bg-white border border-[#D9DDD6] rounded-lg overflow-hidden">
             {loadingRequests ? (
-              <div className="py-8 text-center text-xs text-[#64748B] flex flex-col items-center justify-center gap-2">
-                <div className="w-6 h-6 border-2 border-[#2F7D78] border-t-transparent rounded-full animate-spin" />
-                <span>Loading access records from hospital database...</span>
+              <div className="py-10 text-center text-sm text-[#5F6B72] flex flex-col items-center gap-3">
+                <div className="w-6 h-6 border-2 border-[#17635E] border-t-transparent rounded-full animate-spin" />
+                <span>Loading your requests…</span>
               </div>
             ) : requestsError ? (
-              <div className="rounded-xl border border-[#FECACA] p-5 bg-[#FEF2F2] flex items-start justify-between gap-3.5">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="text-sm font-bold text-[#991B1B]">Failed to Load Clinical Requests</h3>
-                    <p className="text-xs text-[#7F1D1D] mt-1">{requestsError}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={fetchRecentRequests}
-                  className="px-3 py-1.5 bg-[#DC2626] hover:bg-[#B91C1C] text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shrink-0"
+              <div className="p-4">
+                <Notice
+                  tone="red"
+                  icon={<AlertTriangle className="w-5 h-5" />}
+                  title="Couldn’t load your requests"
+                  action={
+                    <button
+                      type="button"
+                      onClick={fetchRecentRequests}
+                      className="shrink-0 px-3.5 py-1.5 bg-[#A32A2A] hover:bg-[#8A2222] text-white rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Try again</span>
+                    </button>
+                  }
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Retry</span>
-                </button>
+                  {requestsError}
+                </Notice>
               </div>
             ) : recentRequests.length === 0 ? (
-              <div className="py-8 text-center bg-[#F7F9FB] rounded-xl border border-dashed border-[#DCE4ED]">
-                <p className="text-xs text-[#0F172A] font-semibold">No clinical access requests on record yet.</p>
-                <p className="text-[11px] text-[#64748B] mt-0.5">
-                  Use the directory search above to find patients and request clinical consultation access.
-                </p>
+              <div className="py-10 px-6 text-center">
+                <p className="text-base" style={serif}>No requests yet</p>
+                <p className="text-sm text-[#5F6B72] mt-1">Search for a patient above to send your first access request.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left text-sm">
                   <thead>
-                    <tr className="border-b border-[#DCE4ED] text-[#64748B] uppercase tracking-wider font-bold text-[10px]">
-                      <th className="py-3 px-3">Patient</th>
-                      <th className="py-3 px-3">Patient ID</th>
-                      <th className="py-3 px-3">Status</th>
-                      <th className="py-3 px-3">Requested At</th>
-                      <th className="py-3 px-3">Action</th>
+                    <tr className="bg-[#F4F5F2] text-[#5F6B72] text-xs font-medium">
+                      <th className="py-3 px-5 font-medium">Patient</th>
+                      <th className="py-3 px-5 font-medium">Patient ID</th>
+                      <th className="py-3 px-5 font-medium">Status</th>
+                      <th className="py-3 px-5 font-medium">Requested</th>
+                      <th className="py-3 px-5 font-medium text-right">Records</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#DCE4ED]">
+                  <tbody className="divide-y divide-[#E4E7E2]">
                     {recentRequests.map((req) => (
-                      <tr key={req.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-3 px-3 font-bold text-slate-900">{req.patientName}</td>
-                        <td className="py-3 px-3 font-mono text-slate-600">{req.patientCode}</td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              req.status === "APPROVED"
-                                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                                : req.status === "PENDING"
-                                ? "bg-amber-100 text-amber-800 border border-amber-200"
-                                : req.status === "REVOKED"
-                                ? "bg-rose-100 text-rose-800 border border-rose-200"
-                                : "bg-slate-100 text-slate-800"
-                            }`}
-                          >
-                            {req.status === "APPROVED" && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
-                            {req.status === "PENDING" && <Clock className="w-3 h-3 text-amber-600" />}
-                            {req.status === "REVOKED" && <XCircle className="w-3 h-3 text-rose-600" />}
-                            {req.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 font-mono text-slate-500">
+                      <tr key={req.id} className="hover:bg-[#FAFBF9] transition-colors">
+                        <td className="py-3.5 px-5 font-medium">{req.patientName}</td>
+                        <td className="py-3.5 px-5 text-[#5F6B72]" style={mono}>{req.patientCode}</td>
+                        <td className="py-3.5 px-5"><StatusPill status={req.status} /></td>
+                        <td className="py-3.5 px-5 text-[#5F6B72]">
                           {new Date(req.requestedAt).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
                             year: "numeric",
                           })}
                         </td>
-                        <td className="py-3 px-3">
+                        <td className="py-3.5 px-5 text-right">
                           {req.status === "APPROVED" ? (
                             <button
                               onClick={() => router.push(`/doctor/patients/${req.patientCode}`)}
-                              className="px-3 py-1.5 bg-[#2F7D78] hover:bg-[#256B66] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs"
+                              className="px-3.5 py-1.5 bg-[#17635E] hover:bg-[#0F4F4B] text-white rounded-md text-sm font-medium inline-flex items-center gap-1.5 transition-colors"
                             >
-                              <span>View Records</span>
-                              <ExternalLink className="w-3 h-3" />
+                              <span>View records</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
                             </button>
                           ) : (
-                            <span className="text-[11px] text-slate-400 italic">Access locked</span>
+                            <span className="inline-flex items-center gap-1.5 text-xs text-[#7A858B]">
+                              <Lock className="w-3.5 h-3.5" />
+                              Locked
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -948,14 +875,9 @@ export default function DoctorDashboardPage() {
           </div>
         </section>
 
-        {/* Security & Regulatory Notice */}
-        <footer className="text-center text-xs text-slate-400 pt-4 pb-8 space-y-1">
-          <p>
-            PharmaBrain Clinical Review System — For licensed medical practitioner consultation only.
-          </p>
-          <p className="text-[11px] text-slate-400">
-            All directory queries are audited. All clinical record disclosures require confirmed patient authorization.
-          </p>
+        <footer className="pt-2 pb-8 text-xs text-[#7A858B] leading-relaxed max-w-2xl">
+          <p>PharmaBrain Clinical Review System, for licensed medical practitioners only.</p>
+          <p>Every directory search is logged, and viewing any clinical record requires the patient’s confirmed authorization.</p>
         </footer>
       </main>
     </div>

@@ -4,18 +4,15 @@ import React, { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft,
   ShieldCheck,
   Lock,
   FileText,
   Pill,
   Activity,
-  Calendar,
   AlertCircle,
   Clock,
   CheckCircle2,
   TrendingUp,
-  FileCheck2,
   AlertTriangle,
   RotateCcw,
   Heart,
@@ -26,6 +23,11 @@ import {
   Check,
   Printer,
   Eye,
+  ExternalLink,
+  Droplet,
+  Phone,
+  MapPin,
+  Mail,
 } from "lucide-react";
 
 interface MedicationItem {
@@ -47,6 +49,8 @@ interface MedicationItem {
   actual_end_date?: string | null;
   expected_end_date?: string | null;
   discontinued_reason?: string | null;
+  reference_id?: string | number | null;
+  source?: string | null;
 }
 
 interface ObservationItem {
@@ -72,6 +76,9 @@ interface DocStructuredResult {
   doctor_reg_no?: string | null;
   dateIso?: string | null;
   medicines?: DocStructuredMedicine[];
+  vitals?: unknown[];
+  diagnoses?: unknown[];
+  notes?: string;
   [key: string]: unknown;
 }
 
@@ -127,6 +134,28 @@ interface DocumentItem {
   uploadedAt: string;
   summary?: string | null;
   structuredResult?: DocStructuredResult | null;
+  storedFilename?: string | null;
+  filePath?: string | null;
+  imageUrl?: string | null;
+}
+
+function getPrescriptionImageUrl(doc: DocumentItem | null): string | null {
+  if (!doc) return null;
+  const candidate =
+    doc.imageUrl ||
+    (doc.structuredResult as Record<string, unknown> | null | undefined)?.imageUrl ||
+    doc.storedFilename ||
+    doc.filePath;
+  if (!candidate || typeof candidate !== "string") return null;
+  const trimmed = candidate.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("/uploads/")) {
+    return trimmed;
+  }
+  const clean = trimmed.replace(/^(\.\/|\/)/, "");
+  return `https://dvydfsahkqzgluusdsnn.supabase.co/storage/v1/object/public/OCR_Images/uploads/${clean}`;
 }
 
 interface RecordDossier {
@@ -146,9 +175,9 @@ interface RecordDossier {
     legacyPatientId?: string | null;
     accountRegisteredAt: string;
     onboardingInfo?: {
-      basic_info?: Record<string, string | number | boolean | null>;
-      conditions?: Record<string, string | number | boolean | null>;
-      custom_conditions?: Record<string, string | number | boolean | null>;
+      basic_info?: Record<string, unknown> | null;
+      conditions?: Record<string, unknown> | null;
+      custom_conditions?: unknown[] | Record<string, unknown> | null;
       history?: {
         allergies?: string | null;
         pastSurgeries?: string | null;
@@ -451,9 +480,6 @@ export default function DoctorPatientRecordPage() {
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dossier, setDossier] = useState<RecordDossier | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "medications" | "prescriptions" | "vitals" | "trends">(
-    "overview"
-  );
 
   // Active section for in-page navigation & filters
   const [activeSection, setActiveSection] = useState<string>("overview");
@@ -462,6 +488,10 @@ export default function DoctorPatientRecordPage() {
   const [patientSearchInput, setPatientSearchInput] = useState("");
   const [selectedDocForModal, setSelectedDocForModal] = useState<DocumentItem | null>(null);
   const [selectedDiscrepancy, setSelectedDiscrepancy] = useState<MedicationItem | null>(null);
+  const [showAllMedications, setShowAllMedications] = useState(false);
+  const [isMedicationsModalOpen, setIsMedicationsModalOpen] = useState(false);
+  const [showAllDocs, setShowAllDocs] = useState(false);
+  const [docModalTab, setDocModalTab] = useState<"scan" | "details">("scan");
 
   const loadDossier = React.useCallback(async () => {
     if (!cleanPatientId) {
@@ -623,16 +653,16 @@ export default function DoctorPatientRecordPage() {
   }
 
   const {
-    patient = { id: 0, name: "Patient", email: "", patientId: cleanPatientId, accountRegisteredAt: "" },
+    patient = { id: 0, name: "", email: "", patientId: cleanPatientId, accountRegisteredAt: "" },
     medicalSummary = { totalDocuments: 0, confirmedPrescriptionsCount: 0, draftPrescriptionsCount: 0, activeMedicationsCount: 0, totalObservationsCount: 0 },
     documents = [],
     medications = { active: [], history: [], needsReview: [], total: 0 },
     observations = [],
     longitudinalTrends = null,
-    authorization = { status: "APPROVED", authorizedDoctor: "Doctor", doctorCode: "", approvedAt: "", auditNote: "" },
+    authorization = { status: "", authorizedDoctor: "", doctorCode: "", approvedAt: "", auditNote: "" },
     conditions: dbConditions = [],
     allergies: dbAllergies = [],
-  } = dossier;
+  } = dossier || {};
 
   // Safe collections
   const safeMedications = {
@@ -644,25 +674,155 @@ export default function DoctorPatientRecordPage() {
   const safeObs = Array.isArray(observations) ? observations : [];
   const safeDocs = Array.isArray(documents) ? documents : [];
 
-  // Derive patient metadata
-  const basicInfo = patient?.onboardingInfo?.basic_info || {};
-  const patientAge = basicInfo.age ? `${basicInfo.age} y/o` : "Adult";
-  const patientGender = basicInfo.gender ? String(basicInfo.gender) : "Patient";
+  // Derive patient metadata dynamically
+  const basicInfo = (patient?.onboardingInfo?.basic_info as Record<string, unknown>) || {};
+  
+  // Calculate dynamic age from explicit age or birth date
+  let patientAge: string | null = null;
+  if (basicInfo.age != null && basicInfo.age !== "") {
+    patientAge = `${basicInfo.age} y/o`;
+  } else if (basicInfo.dob) {
+    const birth = new Date(String(basicInfo.dob));
+    if (!isNaN(birth.getTime())) {
+      const today = new Date();
+      let years = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+        years--;
+      }
+      if (years >= 0) patientAge = `${years} y/o`;
+    }
+  }
+
+  const patientGender = basicInfo.gender ? String(basicInfo.gender).trim() : null;
   const patientDob = basicInfo.dob ? String(basicInfo.dob) : null;
+  const patientBloodGroup = (basicInfo.bloodGroup || basicInfo.blood_group || basicInfo.blood || basicInfo.bloodType)
+    ? String(basicInfo.bloodGroup || basicInfo.blood_group || basicInfo.blood || basicInfo.bloodType).trim().toUpperCase()
+    : null;
+  const patientPhone = (basicInfo.phone || basicInfo.phone_number || basicInfo.contact)
+    ? String(basicInfo.phone || basicInfo.phone_number || basicInfo.contact).trim()
+    : null;
+  const patientCity = basicInfo.city ? String(basicInfo.city).trim() : null;
+  const patientState = basicInfo.state ? String(basicInfo.state).trim() : null;
+  const patientPincode = basicInfo.pincode ? String(basicInfo.pincode).trim() : null;
+  const patientAddress = basicInfo.address ? String(basicInfo.address).trim() : null;
+  const emergencyContactName = (basicInfo.emergencyName || basicInfo.emergency_contact_name || basicInfo.emergency_contact)
+    ? String(basicInfo.emergencyName || basicInfo.emergency_contact_name || basicInfo.emergency_contact).trim()
+    : null;
+  const emergencyContactPhone = (basicInfo.emergencyPhone || basicInfo.emergency_contact_phone)
+    ? String(basicInfo.emergencyPhone || basicInfo.emergency_contact_phone).trim()
+    : null;
+
+  // Normalized conditions from database + onboarding without hardcoding category/source
+  interface StructuredConditionItem {
+    id: string | number;
+    name: string;
+    category: string;
+    status: string;
+    source: string;
+    diagnosedDate?: string | null;
+  }
+
+  const structuredConditions: StructuredConditionItem[] = [];
+  const seenNames = new Set<string>();
+
+  if (Array.isArray(dbConditions)) {
+    dbConditions.forEach((c: any, idx: number) => {
+      const name = (c?.condition_name || "").trim();
+      if (name && !seenNames.has(name.toLowerCase())) {
+        seenNames.add(name.toLowerCase());
+        structuredConditions.push({
+          id: c.id || `db-cond-${idx}`,
+          name,
+          category: c.category || c.status || "Condition",
+          status: c.status || "Active",
+          source: c.doctor
+            ? `Diagnosed by ${formatDoctorName(c.doctor)}`
+            : c.facility
+            ? formatHospitalName(c.facility)
+            : "Clinical Record Confirmed",
+          diagnosedDate: c.diagnosed_date || null,
+        });
+      }
+    });
+  }
+
   const conditionsList = Array.isArray(patient?.onboardingInfo?.conditions)
     ? (patient.onboardingInfo?.conditions as string[])
     : [];
   const customConditionsList = Array.isArray(patient?.onboardingInfo?.custom_conditions)
     ? (patient.onboardingInfo?.custom_conditions as string[])
     : [];
-  const dbCondNames = (dbConditions || []).map((c: any) => c?.condition_name).filter(Boolean);
-  const allConditions = Array.from(new Set([...dbCondNames, ...conditionsList, ...customConditionsList]));
 
-  const dbAllergyNames = (dbAllergies || []).map((a: any) => a?.allergen).filter(Boolean);
-  const patientAllergies =
-    dbAllergyNames.length > 0
-      ? dbAllergyNames.join(", ")
-      : patient?.onboardingInfo?.history?.allergies || null;
+  [...conditionsList, ...customConditionsList].forEach((cond, idx) => {
+    const name = (typeof cond === "string" ? cond : "").trim();
+    if (name && !seenNames.has(name.toLowerCase())) {
+      seenNames.add(name.toLowerCase());
+      structuredConditions.push({
+        id: `onb-cond-${idx}`,
+        name,
+        category: "Reported",
+        status: "Self-Reported",
+        source: "Patient Onboarding Declaration",
+        diagnosedDate: null,
+      });
+    }
+  });
+
+  // Structured allergies without hardcoding counts or intake labels
+  interface StructuredAllergyItem {
+    id: string | number;
+    name: string;
+    severity: string;
+    status: string;
+    reaction: string;
+    source: string;
+  }
+
+  const structuredAllergies: StructuredAllergyItem[] = [];
+  const seenAllergens = new Set<string>();
+
+  if (Array.isArray(dbAllergies) && dbAllergies.length > 0) {
+    dbAllergies.forEach((a: any, idx: number) => {
+      const allergen = (a?.allergen || "").trim();
+      if (allergen && !seenAllergens.has(allergen.toLowerCase())) {
+        seenAllergens.add(allergen.toLowerCase());
+        structuredAllergies.push({
+          id: a.id || `db-all-${idx}`,
+          name: allergen,
+          severity: a.severity || a.status || "Active Flag",
+          status: a.verification_status || a.status || "Confirmed",
+          reaction: a.reaction ? `Reaction: ${a.reaction}` : a.notes ? String(a.notes) : "Documented clinical allergy",
+          source: a.source ? `Source: ${a.source}` : "Clinical Record",
+        });
+      }
+    });
+  }
+
+  const onboardingAllergies = patient?.onboardingInfo?.history?.allergies;
+  if (typeof onboardingAllergies === "string" && onboardingAllergies.trim()) {
+    onboardingAllergies
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((allergen, idx) => {
+        if (!seenAllergens.has(allergen.toLowerCase())) {
+          seenAllergens.add(allergen.toLowerCase());
+          structuredAllergies.push({
+            id: `onb-all-${idx}`,
+            name: allergen,
+            severity: "Declared",
+            status: "Self-Reported",
+            reaction: "Documented during patient intake",
+            source: "Patient Intake",
+          });
+        }
+      });
+  }
+
+  const patientAllergiesSummary = structuredAllergies.length > 0
+    ? structuredAllergies.map((a) => a.name).join(", ")
+    : null;
 
   // Derive latest vitals measurements directly from database observations
   const bpObs = safeObs.filter((o) => o && (o.kind === "bp" || o.kind === "blood_pressure"));
@@ -710,13 +870,58 @@ export default function DoctorPatientRecordPage() {
   );
   const latestWeight = weightObs[weightObs.length - 1] || null;
 
+  const heightObs = safeObs.filter(
+    (o) => o && typeof o.kind === "string" && (o.kind === "height" || o.kind === "ht")
+  );
+  const latestHeight = heightObs[heightObs.length - 1] || null;
+  const rawHeightVal = latestHeight?.value ?? (basicInfo?.height ? Number(basicInfo.height) : null);
+
+  let parsedHeightM: number | null = null;
+  if (rawHeightVal != null && !isNaN(Number(rawHeightVal)) && Number(rawHeightVal) > 0) {
+    const val = Number(rawHeightVal);
+    if (val > 30 && val < 280) parsedHeightM = val / 100; // cm to meters
+    else if (val >= 0.5 && val <= 2.8) parsedHeightM = val; // already in meters
+  }
+
   const bmiObs = safeObs.filter((o) => o && o.kind === "bmi");
   const latestBmi = bmiObs[bmiObs.length - 1] || null;
+
+  let calculatedBmi: string | null = null;
+  if (latestBmi?.value != null) {
+    calculatedBmi = Number(latestBmi.value).toFixed(1);
+  } else if (latestWeight?.value != null && parsedHeightM != null) {
+    const w = Number(latestWeight.value);
+    if (w > 0) {
+      calculatedBmi = (w / (parsedHeightM * parsedHeightM)).toFixed(1);
+    }
+  }
 
   const creatinineObs = safeObs.filter(
     (o) => o && typeof o.kind === "string" && o.kind.includes("creatinine")
   );
   const latestCreatinine = creatinineObs[creatinineObs.length - 1] || null;
+
+  // Derive latest record validation timestamp
+  const validationTimestamps: number[] = [];
+  safeObs.forEach((o) => {
+    if (o.obs_date) {
+      const t = new Date(o.obs_date).getTime();
+      if (!isNaN(t)) validationTimestamps.push(t);
+    }
+  });
+  safeDocs.forEach((d) => {
+    if (d.uploadedAt) {
+      const t = new Date(d.uploadedAt).getTime();
+      if (!isNaN(t)) validationTimestamps.push(t);
+    }
+  });
+  if (authorization?.approvedAt) {
+    const t = new Date(authorization.approvedAt).getTime();
+    if (!isNaN(t)) validationTimestamps.push(t);
+  }
+  const latestValidationDate = validationTimestamps.length > 0
+    ? new Date(Math.max(...validationTimestamps)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   // Map observations to chronological history arrays for trend analysis
   const bpHistory = bpObs
@@ -767,16 +972,23 @@ export default function DoctorPatientRecordPage() {
   const currentBp = filteredBp.length > 0 ? filteredBp[filteredBp.length - 1] : null;
 
   // Derive latest clinical event (consultation note or most recent document)
-  const latestEventDoc = documents[0] || null;
+  const latestEventDoc = safeDocs[0] || null;
 
   // Filter timeline documents
-  const filteredTimelineDocs = documents.filter((doc) => {
+  const filteredTimelineDocs = safeDocs.filter((doc) => {
     if (timelineFilter === "ALL") return true;
     if (timelineFilter === "PRESCRIPTION") return doc.documentType?.toUpperCase().includes("PRESCRIPTION");
     if (timelineFilter === "LAB") return doc.documentType?.toUpperCase().includes("LAB") || doc.documentType?.toUpperCase().includes("REPORT");
     if (timelineFilter === "CONSULT") return doc.documentType?.toUpperCase().includes("CONSULT") || doc.documentType?.toUpperCase().includes("SUMMARY");
     return true;
   });
+
+  const timelineCounts = {
+    ALL: safeDocs.length,
+    PRESCRIPTION: safeDocs.filter((d) => d.documentType?.toUpperCase().includes("PRESCRIPTION")).length,
+    LAB: safeDocs.filter((d) => d.documentType?.toUpperCase().includes("LAB") || d.documentType?.toUpperCase().includes("REPORT")).length,
+    CONSULT: safeDocs.filter((d) => d.documentType?.toUpperCase().includes("CONSULT") || d.documentType?.toUpperCase().includes("SUMMARY")).length,
+  };
 
   const scrollToSection = (id: string) => {
     setActiveSection(id);
@@ -810,18 +1022,6 @@ export default function DoctorPatientRecordPage() {
                 Patient-Centric DMR
               </span>
             </Link>
-
-            <div className="hidden xl:flex items-center bg-[#F1F5F9] p-1 rounded-lg border border-[#DCE4ED]">
-              <span className="px-2.5 py-1 rounded bg-white text-xs font-semibold text-[#2F7D78] shadow-xs">
-                Doctor Portal
-              </span>
-              <Link
-                href="/patient/overview"
-                className="px-2.5 py-1 rounded text-xs font-medium text-[#64748B] hover:text-[#0F172A] transition-colors"
-              >
-                Patient Portal
-              </Link>
-            </div>
           </div>
 
           {/* Quick Patient ID Search */}
@@ -832,7 +1032,7 @@ export default function DoctorPatientRecordPage() {
                 type="text"
                 value={patientSearchInput}
                 onChange={(e) => setPatientSearchInput(e.target.value)}
-                placeholder="Search patient by ID (e.g. P-829017616)..."
+                placeholder={cleanPatientId ? `Search patient by ID (current: ${cleanPatientId})...` : "Search patient by ID..."}
                 className="w-full pl-9 pr-4 py-1.5 bg-[#F8FAFC] rounded-lg border border-[#DCE4ED] text-xs text-[#0F172A] placeholder-[#94A3B8] focus:outline-hidden focus:border-[#2F7D78] focus:bg-white transition-all font-mono"
               />
             </form>
@@ -845,7 +1045,7 @@ export default function DoctorPatientRecordPage() {
               <span className="w-2 h-2 rounded-full bg-[#2F7D78] animate-pulse" />
               <ShieldCheck className="w-4 h-4 text-[#2F7D78]" />
               <span className="text-xs text-[#2F7D78] font-medium truncate max-w-xs">
-                Active Consent • Dr. {authorization?.authorizedDoctor || "Attending Doctor"}
+                {authorization?.status === "APPROVED" ? "Active Consent" : (authorization?.status || "Consent")} • Dr. {authorization?.authorizedDoctor || "Attending Doctor"}
               </span>
             </div>
 
@@ -865,7 +1065,7 @@ export default function DoctorPatientRecordPage() {
             <div className="flex items-center gap-2.5 pl-2 border-l border-[#DCE4ED]">
               <div className="hidden sm:flex flex-col text-right">
                 <span className="text-xs font-semibold text-[#0F172A] leading-tight">
-                  Dr. {authorization?.authorizedDoctor || "Doctor"}
+                  {authorization?.authorizedDoctor ? `Dr. ${authorization.authorizedDoctor}` : "Attending Doctor"}
                 </span>
                 <span className="text-[11px] font-mono text-[#64748B] leading-tight">
                   {authorization?.doctorCode || ""}
@@ -891,14 +1091,22 @@ export default function DoctorPatientRecordPage() {
                 Active Record
               </span>
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF]">
-                Consent Verified
+                {authorization?.status === "APPROVED" ? "Consent Verified" : (authorization?.status || "Consent Active")}
               </span>
             </div>
-            <div className="text-sm font-bold text-[#0F172A] truncate">{patient.name}</div>
-            <div className="flex items-center gap-2 mt-1 text-xs text-[#64748B] font-mono">
-              <span>{patientAge}</span>
-              <span>•</span>
-              <span className="truncate">{patient.patientId}</span>
+            <div className="text-sm font-bold text-[#0F172A] truncate">{patient?.name || "Patient Record"}</div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-[#64748B]">
+              {patientAge && <span className="font-medium">{patientAge}</span>}
+              {patientGender && <span>• {patientGender}</span>}
+              {patientBloodGroup && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-[#FEF2F2] text-[#DC2626] font-bold text-[10px] border border-[#FECACA]">
+                  <Droplet className="w-2.5 h-2.5 fill-current" />
+                  <span>{patientBloodGroup}</span>
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] font-mono text-[#94A3B8] mt-1 truncate">
+              ID: {patient.patientId}
             </div>
           </div>
 
@@ -906,12 +1114,11 @@ export default function DoctorPatientRecordPage() {
           <nav className="flex flex-col gap-1">
             {[
               { id: "overview", label: "Patient Overview", icon: Activity },
-              { id: "alerts", label: "Attention Flags", icon: AlertTriangle, badge: medications.needsReview.length > 0 ? String(medications.needsReview.length) : undefined },
+              { id: "alerts", label: "Attention Flags", icon: AlertTriangle, badge: safeMedications.needsReview.length > 0 ? String(safeMedications.needsReview.length) : undefined },
               { id: "diagnostic-snapshot", label: "Diagnostic Snapshot", icon: Stethoscope },
-              { id: "ai-synthesis", label: "AI Health Summary", icon: Sparkles },
               { id: "biomarkers", label: "Vitals & Trends", icon: TrendingUp },
-              { id: "timeline", label: "Medical Timeline", icon: Clock, count: documents.length },
-              { id: "documents", label: "Reports & Documents", icon: FileText, count: documents.length },
+              { id: "timeline", label: "Medical Timeline", icon: Clock, count: safeDocs.length },
+              { id: "documents", label: "Reports & Documents", icon: FileText, count: safeDocs.length },
             ].map((item) => {
               const Icon = item.icon;
               const isActive = activeSection === item.id;
@@ -949,9 +1156,11 @@ export default function DoctorPatientRecordPage() {
               <RotateCcw className="w-4 h-4 text-[#2F7D78] shrink-0" />
               <div className="flex flex-col truncate">
                 <span className="text-xs font-semibold text-[#0F172A] truncate">
-                  {patient.name}
+                  {patient?.name || "Patient Record"}
                 </span>
-                <span className="text-[11px] text-[#64748B]">Approved Dossier</span>
+                <span className="text-[11px] text-[#64748B]">
+                  {authorization?.status ? `${authorization.status} Dossier` : "Clinical Dossier"}
+                </span>
               </div>
             </div>
             <button
@@ -997,9 +1206,22 @@ export default function DoctorPatientRecordPage() {
                     <h1 className="text-xl sm:text-2xl font-bold text-[#0F172A] tracking-tight">
                       {patient?.name || "Patient"}
                     </h1>
-                    <span className="px-2.5 py-0.5 rounded-full bg-[#F1F5F9] text-[#475569] text-xs font-medium">
-                      {patientAge} {patientGender !== "Patient" ? `• ${patientGender}` : ""}
-                    </span>
+                    {patientAge && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#F1F5F9] text-[#475569] text-xs font-medium">
+                        {patientAge}
+                      </span>
+                    )}
+                    {patientGender && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#F1F5F9] text-[#475569] text-xs font-medium">
+                        {patientGender}
+                      </span>
+                    )}
+                    {patientBloodGroup && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA] text-xs font-bold shadow-2xs">
+                        <Droplet className="w-3 h-3 fill-[#DC2626]" />
+                        <span>{patientBloodGroup}</span>
+                      </span>
+                    )}
                     {patientDob && (
                       <span className="text-xs text-[#64748B] font-medium hidden sm:inline">
                         DOB: {patientDob}
@@ -1028,10 +1250,12 @@ export default function DoctorPatientRecordPage() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#E8F6F4] text-[#2F7D78] text-xs font-semibold border border-[#A7E9DF]">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Full Longitudinal Access</span>
+                    <span>{authorization?.status ? `${authorization.status} Clinical Access` : "Authorized Clinical Access"}</span>
                   </div>
                   <span className="text-[11px] text-[#64748B] font-mono">
-                    Approved: {new Date(authorization.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    {authorization?.approvedAt
+                      ? `Approved: ${new Date(authorization.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                      : authorization?.status || "Authorized"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs text-[#64748B] pt-1 border-t border-[#DCE4ED]">
@@ -1058,11 +1282,11 @@ export default function DoctorPatientRecordPage() {
                 <div className="flex items-center gap-2 w-full">
                   <button
                     type="button"
-                    onClick={() => scrollToSection("ai-synthesis")}
+                    onClick={() => scrollToSection("biomarkers")}
                     className="h-9 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white text-[#0F172A] border border-[#DCE4ED] hover:bg-[#F7F9FB] font-semibold text-xs transition-colors flex-1"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-[#2F7D78]" />
-                    <span>AI Synthesis</span>
+                    <Activity className="w-3.5 h-3.5 text-[#2F7D78]" />
+                    <span>Vitals & Trends</span>
                   </button>
                   <button
                     type="button"
@@ -1070,8 +1294,95 @@ export default function DoctorPatientRecordPage() {
                     className="h-9 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white text-[#0F172A] border border-[#DCE4ED] hover:bg-[#F7F9FB] font-semibold text-xs transition-colors flex-1"
                   >
                     <FileText className="w-3.5 h-3.5 text-[#2874B5]" />
-                    <span>Docs ({documents.length})</span>
+                    <span>Docs ({safeDocs.length})</span>
                   </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Comprehensive Demographic & Contact Information Strip */}
+            <div className="mt-4 pt-4 border-t border-[#DCE4ED] grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+              {/* Blood Group */}
+              <div className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-[#64748B] flex items-center gap-1">
+                  <Droplet className="w-3 h-3 text-[#DC2626] fill-[#DC2626]" />
+                  <span>Blood Group</span>
+                </span>
+                <span className="font-bold text-[#DC2626] text-sm mt-0.5">
+                  {patientBloodGroup || "Not Specified"}
+                </span>
+              </div>
+
+              {/* Age & Sex */}
+              <div className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-[#64748B] flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-[#2F7D78]" />
+                  <span>Age & Sex</span>
+                </span>
+                <span className="font-semibold text-[#0F172A] mt-0.5">
+                  {patientAge ? `${patientAge}` : "Age N/A"}{patientGender ? ` • ${patientGender}` : ""}
+                </span>
+              </div>
+
+              {/* Contact Phone */}
+              <div className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-[#64748B] flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-[#2874B5]" />
+                  <span>Phone Number</span>
+                </span>
+                <span className="font-mono font-semibold text-[#0F172A] mt-0.5 truncate" title={patientPhone || undefined}>
+                  {patientPhone ? `+91 ${patientPhone.replace(/^\+91\s*/, "")}` : "Not Recorded"}
+                </span>
+              </div>
+
+              {/* Email Address */}
+              <div className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-[#64748B] flex items-center gap-1">
+                  <Mail className="w-3 h-3 text-[#64748B]" />
+                  <span>Email</span>
+                </span>
+                <span className="font-medium text-[#0F172A] mt-0.5 truncate" title={patient.email || undefined}>
+                  {patient.email || "Not Provided"}
+                </span>
+              </div>
+
+              {/* Residential Location */}
+              <div className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-[#64748B] flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-[#64748B]" />
+                  <span>Address / City</span>
+                </span>
+                <span className="font-medium text-[#0F172A] mt-0.5 truncate" title={patientAddress ? `${patientAddress}, ${patientCity || ""} ${patientState || ""} ${patientPincode || ""}` : undefined}>
+                  {patientCity || patientAddress ? (
+                    <span>
+                      {patientAddress ? `${patientAddress}, ` : ""}
+                      {patientCity ? `${patientCity.charAt(0).toUpperCase() + patientCity.slice(1)}` : ""}
+                      {patientState ? `, ${patientState}` : ""}
+                      {patientPincode ? ` (${patientPincode})` : ""}
+                    </span>
+                  ) : (
+                    "Not Specified"
+                  )}
+                </span>
+              </div>
+
+              {/* Emergency Contact */}
+              <div className="p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-[#64748B] flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-[#D97706]" />
+                  <span>Emergency Contact</span>
+                </span>
+                <div className="mt-0.5 truncate" title={emergencyContactName ? `${emergencyContactName} (${emergencyContactPhone || ""})` : undefined}>
+                  {emergencyContactName ? (
+                    <>
+                      <span className="font-semibold text-[#0F172A] block truncate">{emergencyContactName}</span>
+                      {emergencyContactPhone && (
+                        <span className="text-[11px] font-mono text-[#64748B] block truncate">+91 {emergencyContactPhone.replace(/^\+91\s*/, "")}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[#94A3B8] italic">None Listed</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1087,19 +1398,21 @@ export default function DoctorPatientRecordPage() {
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-bold text-[#92400E]">
-                    {patientAllergies ? "ALLERGIES RECORDED" : "ALLERGY STATUS"}
+                    {structuredAllergies.length > 0 ? "ALLERGIES RECORDED" : "ALLERGY STATUS"}
                   </span>
                   <span className="text-[10px] uppercase font-bold text-[#92400E] px-1.5 py-0.2 rounded bg-[#FEF3C7]">
-                    {patientAllergies ? "Active Flag" : "Declared"}
+                    {structuredAllergies.length > 0
+                      ? `${structuredAllergies.length} ${structuredAllergies.length === 1 ? "Active Flag" : "Active Flags"}`
+                      : "No Flags"}
                   </span>
                 </div>
                 <p className="text-xs text-[#0F172A] mt-0.5 leading-snug">
-                  {patientAllergies ? (
+                  {structuredAllergies.length > 0 ? (
                     <span>
-                      <strong className="text-[#DC2626]">Patient Declared:</strong> {patientAllergies}
+                      <strong className="text-[#DC2626]">Documented:</strong> {patientAllergiesSummary}
                     </span>
                   ) : (
-                    <span className="text-[#64748B]">No specific allergies flagged during patient onboarding.</span>
+                    <span className="text-[#64748B]">No specific allergies flagged in patient records.</span>
                   )}
                 </p>
               </div>
@@ -1110,12 +1423,12 @@ export default function DoctorPatientRecordPage() {
               <div className="flex items-start gap-3 min-w-0">
                 <div
                   className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                    medications.needsReview.length > 0
+                    safeMedications.needsReview.length > 0
                       ? "bg-[#FEE2E2] text-[#DC2626]"
                       : "bg-[#E8F6F4] text-[#2F7D78]"
                   }`}
                 >
-                  {medications.needsReview.length > 0 ? (
+                  {safeMedications.needsReview.length > 0 ? (
                     <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
                   ) : (
                     <CheckCircle2 className="w-4 h-4" />
@@ -1125,26 +1438,27 @@ export default function DoctorPatientRecordPage() {
                   <div className="flex items-center gap-2">
                     <span
                       className={`text-xs font-bold ${
-                        medications.needsReview.length > 0 ? "text-[#DC2626]" : "text-[#2F7D78]"
+                        safeMedications.needsReview.length > 0 ? "text-[#DC2626]" : "text-[#2F7D78]"
                       }`}
                     >
-                      {medications.needsReview.length > 0
-                        ? `CLINICAL DISCREPANCY DETECTED (${medications.needsReview.length})`
+                      {safeMedications.needsReview.length > 0
+                        ? `CLINICAL DISCREPANCY DETECTED (${safeMedications.needsReview.length})`
                         : "NO ACTIVE RECONCILIATION CONFLICTS"}
                     </span>
                     <span className="text-[11px] text-[#64748B]">Prescription Safety Check</span>
                   </div>
                   <p className="text-xs text-[#0F172A] leading-tight mt-0.5 truncate sm:whitespace-normal">
-                    {medications.needsReview.length > 0 ? (
+                    {safeMedications.needsReview.length > 0 ? (
                       <span>
-                        Conflict: <strong className="font-semibold">{medications.needsReview[0].name}</strong> —{" "}
-                        {medications.needsReview[0].conflict_details ||
-                          medications.needsReview[0].reconciliation_notes ||
-                          medications.needsReview[0].reconciliation_category}
+                        Conflict: <strong className="font-semibold">{safeMedications.needsReview[0].name}</strong> —{" "}
+                        {safeMedications.needsReview[0].conflict_details ||
+                          safeMedications.needsReview[0].reconciliation_notes ||
+                          safeMedications.needsReview[0].reconciliation_category ||
+                          "Requires clinical review"}
                       </span>
-                    ) : medications.active.length > 0 ? (
+                    ) : safeMedications.active.length > 0 ? (
                       <span>
-                        All {medications.active.length} active prescriptions currently align with recorded health profile.
+                        All {safeMedications.active.length} active prescriptions currently align with recorded health profile.
                       </span>
                     ) : (
                       <span>
@@ -1155,10 +1469,10 @@ export default function DoctorPatientRecordPage() {
                 </div>
               </div>
 
-              {medications.needsReview.length > 0 && (
+              {safeMedications.needsReview.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setSelectedDiscrepancy(medications.needsReview[0])}
+                  onClick={() => setSelectedDiscrepancy(safeMedications.needsReview[0])}
                   className="px-2.5 py-1.5 rounded-lg bg-white text-[#DC2626] border border-[#FECACA] hover:bg-[#FEE2E2] text-xs font-semibold transition-colors shrink-0 self-end sm:self-center"
                 >
                   Review Conflict
@@ -1167,7 +1481,7 @@ export default function DoctorPatientRecordPage() {
             </div>
           </section>
 
-          {/* SECTION 3: Rapid Diagnostic Snapshot (5-Card Mosaic / 3 Columns) */}
+          {/* SECTION 3: Rapid Diagnostic Snapshot */}
           <section id="diagnostic-snapshot" className="bg-white rounded-xl border border-[#DCE4ED] shadow-xs p-5 sm:p-6 flex flex-col gap-5">
             {/* Snapshot Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#DCE4ED] gap-2">
@@ -1185,7 +1499,7 @@ export default function DoctorPatientRecordPage() {
                 </div>
               </div>
               <div className="text-xs text-[#64748B] font-mono sm:text-right">
-                Validated state • <span className="text-[#0F172A] font-semibold">Today</span>
+                Validated state • <span className="text-[#0F172A] font-semibold">{latestValidationDate}</span>
               </div>
             </div>
 
@@ -1204,28 +1518,28 @@ export default function DoctorPatientRecordPage() {
                         </span>
                       </div>
                       <span className="px-2 py-0.5 rounded-full bg-[#E8F6F4] text-[#2F7D78] text-[11px] font-bold">
-                        {allConditions.length} Active
+                        {structuredConditions.length} {structuredConditions.length === 1 ? "Active" : "Active"}
                       </span>
                     </div>
 
                     <div className="space-y-2">
-                      {allConditions.length > 0 ? (
-                        allConditions.slice(0, 3).map((cond, idx) => (
-                          <div key={idx} className="p-2.5 rounded-lg bg-white border border-[#DCE4ED]">
+                      {structuredConditions.length > 0 ? (
+                        structuredConditions.map((cond) => (
+                          <div key={cond.id} className="p-2.5 rounded-lg bg-white border border-[#DCE4ED]">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-[#0F172A]">{cond}</span>
+                              <span className="text-xs font-bold text-[#0F172A]">{cond.name}</span>
                               <span className="text-[10px] font-mono text-[#64748B] bg-[#F1F5F9] px-1.5 py-0.2 rounded">
-                                Chronic
+                                {cond.category}
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5 text-[11px] text-[#2F7D78] mt-1 font-medium">
                               <CheckCircle2 className="w-3 h-3 text-[#2F7D78]" />
-                              <span>Clinical Record Confirmed</span>
+                              <span>{cond.source}{cond.diagnosedDate ? ` • ${cond.diagnosedDate}` : ""}</span>
                             </div>
                           </div>
                         ))
                       ) : (
-                        <p className="text-xs text-[#64748B] italic p-2">No chronic conditions declared.</p>
+                        <p className="text-xs text-[#64748B] italic p-2">No chronic or diagnosed conditions declared.</p>
                       )}
                     </div>
                   </div>
@@ -1252,23 +1566,25 @@ export default function DoctorPatientRecordPage() {
                         </span>
                       </div>
                       <span className="px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] text-[11px] font-bold">
-                        {patientAllergies ? "1 Flagged" : "0 Flags"}
+                        {structuredAllergies.length} {structuredAllergies.length === 1 ? "Flagged" : "Flags"}
                       </span>
                     </div>
 
                     <div className="space-y-2">
-                      {patientAllergies ? (
-                        <div className="p-2.5 rounded-lg bg-white border border-[#FDE68A]">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-[#DC2626]">{patientAllergies}</span>
-                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#FEE2E2] text-[#DC2626] font-semibold">
-                              Reported
-                            </span>
+                      {structuredAllergies.length > 0 ? (
+                        structuredAllergies.map((a) => (
+                          <div key={a.id} className="p-2.5 rounded-lg bg-white border border-[#FDE68A]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-[#DC2626]">{a.name}</span>
+                              <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#FEE2E2] text-[#DC2626] font-semibold">
+                                {a.severity}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#64748B] mt-1 leading-tight">
+                              {a.reaction}
+                            </p>
                           </div>
-                          <p className="text-[11px] text-[#64748B] mt-1 leading-tight">
-                            Documented during patient intake
-                          </p>
-                        </div>
+                        ))
                       ) : (
                         <p className="text-xs text-[#64748B] italic p-2">No known allergies on record.</p>
                       )}
@@ -1277,7 +1593,7 @@ export default function DoctorPatientRecordPage() {
 
                   <div className="pt-3 mt-3 border-t border-[#DCE4ED] flex items-center justify-between text-xs">
                     <span className="text-[#64748B] font-medium">Safety Guardrails</span>
-                    <span className="text-[#2F7D78] font-semibold">Intake Dossier</span>
+                    <span className="text-[#2F7D78] font-semibold">Clinical Records</span>
                   </div>
                 </div>
               </div>
@@ -1295,19 +1611,25 @@ export default function DoctorPatientRecordPage() {
                         </span>
                       </div>
                       <span className="px-2 py-0.5 rounded-full bg-[#E8F6F4] text-[#2F7D78] text-[11px] font-bold">
-                        {medications.active.length} Active
+                        {safeMedications.active.length} Active
                       </span>
                     </div>
 
                     <div className="space-y-2">
-                      {medications.active.length > 0 ? (
-                        medications.active.slice(0, 2).map((m) => (
+                      {safeMedications.active.length > 0 ? (
+                        (showAllMedications ? safeMedications.active : safeMedications.active.slice(0, 5)).map((m) => (
                           <div key={m.id} className="p-2.5 rounded-lg bg-white border border-[#DCE4ED]">
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-bold text-[#0F172A]">{m.name}</span>
-                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#E8F6F4] text-[#2F7D78] font-bold">
-                                {m.frequency || "Daily"}
-                              </span>
+                              {m.frequency ? (
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#E8F6F4] text-[#2F7D78] font-bold">
+                                  {m.frequency}
+                                </span>
+                              ) : m.indication ? (
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#F1F5F9] text-[#64748B] font-medium">
+                                  {m.indication}
+                                </span>
+                              ) : null}
                             </div>
                             <div className="text-[11px] text-[#64748B] mt-1">
                               {m.strength || ""} {m.route ? `• ${m.route}` : ""}
@@ -1320,17 +1642,39 @@ export default function DoctorPatientRecordPage() {
                       ) : (
                         <p className="text-xs text-[#64748B] italic p-2">No active medications recorded.</p>
                       )}
+
+                      {safeMedications.active.length > 5 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllMedications((prev) => !prev)}
+                          className="w-full py-1.5 px-3 text-xs font-semibold text-[#2F7D78] hover:text-[#256B66] bg-[#E8F6F4] hover:bg-[#D5EFEA] rounded-lg transition-colors text-center border border-[#A7E9DF] mt-2 flex items-center justify-center gap-1"
+                        >
+                          <span>
+                            {showAllMedications
+                              ? "Show Less (First 5 medicines)"
+                              : `Show More (${safeMedications.active.length - 5} more active medicines)`}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   <div className="pt-3 mt-3 border-t border-[#DCE4ED] flex items-center justify-between text-xs">
-                    <span className="text-[#64748B] font-medium">Refill Oversight</span>
                     <button
-                      onClick={() => scrollToSection("timeline")}
-                      className="text-[#2F7D78] font-bold hover:underline"
+                      type="button"
+                      onClick={() => setIsMedicationsModalOpen(true)}
+                      className="text-[#2F7D78] font-bold hover:underline inline-flex items-center gap-1"
                     >
-                      Prescription Records →
+                      <Pill className="w-3.5 h-3.5" />
+                      <span>All Medications ({safeMedications.active.length})</span>
                     </button>
+                    <Link
+                      href="/patient/medicines"
+                      target="_blank"
+                      className="text-[#64748B] hover:text-[#0F172A] font-medium inline-flex items-center gap-1 text-[11px]"
+                    >
+                      <span>Medications Page ↗</span>
+                    </Link>
                   </div>
                 </div>
 
@@ -1368,6 +1712,19 @@ export default function DoctorPatientRecordPage() {
                             &ldquo;{latestEventDoc.summary}&rdquo;
                           </div>
                         )}
+                        <div className="mt-2.5 pt-2 border-t border-[#DCE4ED] flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedDocForModal(latestEventDoc);
+                              setDocModalTab("scan");
+                            }}
+                            className="text-xs font-semibold text-[#2F7D78] hover:text-[#256B66] hover:underline inline-flex items-center gap-1.5"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View Original Prescription Scan</span>
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <p className="text-xs text-[#64748B] italic p-2">No clinical documents uploaded.</p>
@@ -1478,10 +1835,8 @@ export default function DoctorPatientRecordPage() {
                         BMI / Mass
                       </span>
                       <div className="text-base sm:text-lg font-bold text-[#0F172A] leading-tight mt-0.5">
-                        {latestBmi?.value != null ? (
-                          <span>{latestBmi.value}</span>
-                        ) : latestWeight?.value != null ? (
-                          <span>{(Number(latestWeight.value) / (1.75 * 1.75)).toFixed(1)}</span>
+                        {calculatedBmi != null ? (
+                          <span>{calculatedBmi}</span>
                         ) : (
                           <span className="text-xs text-[#94A3B8]">Not recorded</span>
                         )}
@@ -1490,7 +1845,7 @@ export default function DoctorPatientRecordPage() {
                         {latestBmi?.obs_date
                           ? latestBmi.obs_date
                           : latestWeight?.value != null
-                          ? `${latestWeight.value} kg${latestWeight.obs_date ? ` • ${latestWeight.obs_date}` : ""}`
+                          ? `${latestWeight.value} kg${parsedHeightM ? ` • ${(parsedHeightM * 100).toFixed(0)} cm` : ""}${latestWeight.obs_date ? ` • ${latestWeight.obs_date}` : ""}`
                           : "Target 18.5 - 24.9"}
                       </div>
                     </div>
@@ -1588,7 +1943,7 @@ export default function DoctorPatientRecordPage() {
                             {Number(latestCreatinine.value) <= 1.2 ? "Normal" : "Elevated"}
                           </span>
                           <span className="text-[10px] text-[#64748B] block mt-0.5">
-                            {latestCreatinine.obs_date || "Verified Lab Reading"}
+                            {latestCreatinine.obs_date || "Lab result"}
                           </span>
                         </>
                       ) : (
@@ -1607,12 +1962,12 @@ export default function DoctorPatientRecordPage() {
 
                 <div className="pt-3 mt-3 border-t border-[#DCE4ED] flex items-center justify-between text-xs">
                   <span className="text-[#64748B] font-medium flex items-center gap-1">
-                    {observations.length > 0 ? (
+                    {safeObs.length > 0 ? (
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5 text-[#2F7D78]" />
                         <span>
-                          {observations.length} Recorded Observation
-                          {observations.length > 1 ? "s" : ""}
+                          {safeObs.length} Recorded Observation
+                          {safeObs.length > 1 ? "s" : ""}
                         </span>
                       </>
                     ) : (
@@ -1633,139 +1988,7 @@ export default function DoctorPatientRecordPage() {
             </div>
           </section>
 
-          {/* SECTION 4: AI-ASSISTED CLINICAL SYNTHESIS (Evidence-Grounded Reasoning Box) */}
-          <section id="ai-synthesis" className="bg-white rounded-xl border border-[#DCE4ED] shadow-xs overflow-hidden">
-            {/* AI Top Header Bar */}
-            <div className="bg-[#2F7D78] text-white px-5 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white">
-                  <Sparkles className="w-4 h-4 stroke-[2.2]" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm tracking-tight text-white">
-                      AI Longitudinal Clinical Synthesis
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-white/20 text-white font-semibold text-[10px]">
-                      Evidence-Grounded
-                    </span>
-                  </div>
-                  <p className="text-white/80 text-[11px]">
-                    Synthesized across {medicalSummary.totalDocuments} external records, EHR notes, and patient history
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 text-xs">
-                <span className="font-mono text-white/80 hidden sm:inline">
-                  Generated: {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors flex items-center gap-1.5"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Brief</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Synthesized Content Matrix */}
-            <div className="p-5 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Left 8 Cols: Numbered Insights & Clinical Background */}
-              <div className="lg:col-span-8 flex flex-col gap-4 text-xs text-[#0F172A] leading-relaxed">
-                {/* Domain 1: Medical Background */}
-                <div className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                    1
-                  </span>
-                  <div className="flex-1">
-                    <strong className="text-[#0F172A] text-xs">Medical Background & Chronicity: </strong>
-                    <span className="text-[#334155]">
-                      {longitudinalTrends?.narrative ||
-                        longitudinalTrends?.summary ||
-                        `${patientAge} ${patientGender} with documented medical history, managed predominantly through outpatient consultation.`}
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 mx-1 rounded bg-[#F1F5F9] text-[#2F7D78] font-mono text-[10px] font-semibold">
-                      [EHR #{(patient?.patientId || cleanPatientId || "0000").slice(-4)}]
-                    </span>
-                  </div>
-                </div>
-
-                {/* Domain 2: Medication Context & Discrepancy */}
-                <div className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                    2
-                  </span>
-                  <div className="flex-1">
-                    <strong className="text-[#0F172A] text-xs">Current Medication Context & Safety: </strong>
-                    <span className="text-[#334155]">
-                      {safeMedications.active.length > 0 ? (
-                        `Active therapy regimen encompasses ${safeMedications.active.map((m) => m.name).join(", ")}. `
-                      ) : (
-                        "No currently ongoing medications identified on active registry. "
-                      )}
-                      {safeMedications.needsReview.length > 0
-                        ? `Clinical discrepancy flagged: ${safeMedications.needsReview[0].name} requires reconciliation between recent documents.`
-                        : "All medication items match verified prescriptions."}
-                    </span>
-                    {documents[0] && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 mx-1 rounded bg-[#F1F5F9] text-[#2F7D78] font-mono text-[10px] font-semibold">
-                        [Doc #{documents[0].id}]
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Domain 3: Biomarker Trajectory */}
-                <div className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                    3
-                  </span>
-                  <div className="flex-1">
-                    <strong className="text-[#0F172A] text-xs">Biomarker Trajectory & Follow-up: </strong>
-                    <span className="text-[#334155]">
-                      {observations.length > 0
-                        ? `Total of ${observations.length} physiological observation records documented across ${medicalSummary.totalDocuments} clinical visits.`
-                        : "No physiological biomarker observations recorded in database yet. Periodic clinical follow-up and baseline diagnostic panel advised."}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right 4 Cols: Active Clinical Safety Callouts */}
-              <div className="lg:col-span-4 flex flex-col gap-3">
-                <div className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] flex flex-col gap-2">
-                  <div className="flex items-center gap-2 text-[#92400E] font-bold text-xs">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>Clinical Guardrail</span>
-                  </div>
-                  <p className="text-[11px] text-[#92400E] leading-relaxed">
-                    AI synthesis is provided for clinician review assistance only. All recommendations require verification against primary medical documents prior to prescription alteration.
-                  </p>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col gap-1.5 text-xs">
-                  <span className="text-[10px] uppercase font-bold text-[#64748B]">Audited Sources</span>
-                  <div className="flex items-center justify-between text-[#0F172A]">
-                    <span>Confirmed Prescriptions:</span>
-                    <strong className="font-mono">{medicalSummary.confirmedPrescriptionsCount}</strong>
-                  </div>
-                  <div className="flex items-center justify-between text-[#0F172A]">
-                    <span>OCR Extracted Records:</span>
-                    <strong className="font-mono">{medicalSummary.draftPrescriptionsCount}</strong>
-                  </div>
-                  <div className="flex items-center justify-between text-[#0F172A]">
-                    <span>Active Regimens:</span>
-                    <strong className="font-mono">{medicalSummary.activeMedicationsCount}</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* SECTION 5: TWO-COLUMN DEEP-DIVE (8 cols vs 4 cols) */}
+          {/* SECTION 4: TWO-COLUMN DEEP-DIVE (8 cols vs 4 cols) */}
           <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* LEFT COLUMN (8 cols): Longitudinal Biomarkers & Medical Timeline */}
             <div className="lg:col-span-8 flex flex-col gap-6">
@@ -2000,7 +2223,9 @@ export default function DoctorPatientRecordPage() {
                             : "text-[#64748B] hover:text-[#0F172A]"
                         }`}
                       >
-                        {filter === "ALL" ? `All (${documents.length})` : filter.charAt(0) + filter.slice(1).toLowerCase()}
+                        {filter === "ALL"
+                          ? `All (${timelineCounts.ALL})`
+                          : `${filter.charAt(0) + filter.slice(1).toLowerCase()} (${timelineCounts[filter]})`}
                       </button>
                     ))}
                   </div>
@@ -2026,7 +2251,7 @@ export default function DoctorPatientRecordPage() {
                                   : "bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]"
                               }`}
                             >
-                              {!doc.isDraft ? "Clinician Confirmed" : "OCR Extraction"}
+                              {doc.clinicalVerification || (!doc.isDraft ? "Clinician Confirmed" : "OCR Extraction")}
                             </span>
                           </div>
                           <span className="font-mono text-xs text-[#64748B]">
@@ -2075,7 +2300,6 @@ export default function DoctorPatientRecordPage() {
 
             {/* RIGHT COLUMN (4 cols): Consolidated Documents */}
             <div className="lg:col-span-4 flex flex-col gap-6">
-
               {/* Consolidated Documents Card */}
               <div id="documents" className="bg-white rounded-xl p-5 border border-[#DCE4ED] shadow-xs flex flex-col gap-4">
                 <div className="flex items-center justify-between">
@@ -2084,13 +2308,13 @@ export default function DoctorPatientRecordPage() {
                     <h3 className="text-sm font-bold text-[#0F172A]">Consolidated Documents</h3>
                   </div>
                   <span className="text-xs font-mono text-[#64748B]">
-                    {documents.length} Files
+                    {safeDocs.length} Files
                   </span>
                 </div>
 
-                <div className="space-y-2">
-                  {documents.length > 0 ? (
-                    documents.slice(0, 8).map((doc) => (
+                <div className="space-y-2 max-h-[540px] overflow-y-auto pr-1">
+                  {safeDocs.length > 0 ? (
+                    (showAllDocs ? safeDocs : safeDocs.slice(0, 5)).map((doc) => (
                       <div
                         key={doc.id}
                         className="p-2.5 rounded-lg bg-[#F7F9FB] hover:bg-[#F1F5F9] transition-colors border border-[#DCE4ED] flex items-center justify-between gap-2"
@@ -2107,16 +2331,19 @@ export default function DoctorPatientRecordPage() {
                               <span>{new Date(doc.uploadedAt).toLocaleDateString()}</span>
                               <span>•</span>
                               <span className={!doc.isDraft ? "text-[#2F7D78] font-semibold" : "text-[#92400E]"}>
-                                {!doc.isDraft ? "Confirmed" : "OCR Draft"}
+                                {doc.clinicalVerification || (!doc.isDraft ? "Confirmed" : "OCR Draft")}
                               </span>
                             </div>
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => setSelectedDocForModal(doc)}
+                          onClick={() => {
+                            setSelectedDocForModal(doc);
+                            setDocModalTab("scan");
+                          }}
                           className="p-1 text-[#64748B] hover:text-[#2F7D78] transition-colors cursor-pointer"
-                          title="View Document"
+                          title="View Document & Scan"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
@@ -2124,6 +2351,20 @@ export default function DoctorPatientRecordPage() {
                     ))
                   ) : (
                     <p className="text-xs text-[#64748B] italic p-3">No documents uploaded yet.</p>
+                  )}
+
+                  {safeDocs.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllDocs((prev) => !prev)}
+                      className="w-full py-2 px-3 text-xs font-semibold text-[#2874B5] hover:text-[#1E5C94] bg-[#F1F5F9] hover:bg-[#E2E8F0] rounded-lg transition-colors text-center border border-[#DCE4ED] mt-2 flex items-center justify-center gap-1"
+                    >
+                      <span>
+                        {showAllDocs
+                          ? "Show Less (First 5 files)"
+                          : `Show More (${safeDocs.length - 5} more files)`}
+                      </span>
+                    </button>
                   )}
                 </div>
               </div>
@@ -2133,64 +2374,320 @@ export default function DoctorPatientRecordPage() {
       </main>
 
       {/* ==========================================
-          4. DOCUMENT PREVIEW MODAL
+          4. DOCUMENT PREVIEW MODAL (WITH SUPABASE SCAN)
           ========================================== */}
-      {selectedDocForModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 border border-[#DCE4ED] shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#DCE4ED] pb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-[#2F7D78]" />
-                <h3 className="font-bold text-sm text-[#0F172A]">{selectedDocForModal.originalName}</h3>
+      {selectedDocForModal && (() => {
+        const prescriptionImgUrl = getPrescriptionImageUrl(selectedDocForModal);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 border border-[#DCE4ED] shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-[#DCE4ED] pb-3 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4 stroke-[2.2]" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-sm text-[#0F172A] truncate">
+                      {selectedDocForModal.originalName}
+                    </h3>
+                    <div className="flex items-center gap-2 text-[11px] text-[#64748B] font-mono">
+                      <span>{selectedDocForModal.uploadedAt ? new Date(selectedDocForModal.uploadedAt).toLocaleDateString() : ""}</span>
+                      <span>•</span>
+                      <span className={!selectedDocForModal.isDraft ? "text-[#2F7D78] font-semibold" : "text-[#92400E]"}>
+                        {selectedDocForModal.clinicalVerification}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDocForModal(null)}
+                  className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors shrink-0"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* View Switcher Tabs */}
+              <div className="flex items-center gap-1 bg-[#F1F5F9] p-1 rounded-lg border border-[#DCE4ED] shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setDocModalTab("scan")}
+                  className={`flex-1 py-1.5 px-3 rounded text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                    docModalTab === "scan"
+                      ? "bg-white text-[#2F7D78] shadow-xs"
+                      : "text-[#64748B] hover:text-[#0F172A]"
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Original Prescription Scan</span>
+                  {prescriptionImgUrl && (
+                    <span className="w-2 h-2 rounded-full bg-[#2F7D78]" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocModalTab("details")}
+                  className={`flex-1 py-1.5 px-3 rounded text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                    docModalTab === "details"
+                      ? "bg-white text-[#2F7D78] shadow-xs"
+                      : "text-[#64748B] hover:text-[#0F172A]"
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Clinical Summary & Details</span>
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="overflow-y-auto flex-1 pr-1 space-y-3">
+                {docModalTab === "scan" ? (
+                  <div className="space-y-3">
+                    {prescriptionImgUrl ? (
+                      <div className="border border-[#DCE4ED] rounded-xl overflow-hidden bg-neutral-900/5 flex flex-col">
+                        <div className="w-full max-h-[460px] overflow-auto flex items-center justify-center p-3 bg-white">
+                          <img
+                            src={prescriptionImgUrl}
+                            alt={selectedDocForModal.originalName || "Original Prescription Scan"}
+                            className="max-h-[420px] w-auto object-contain rounded shadow-xs"
+                          />
+                        </div>
+                        <div className="px-3 py-2 bg-[#F8FAFC] border-t border-[#DCE4ED] flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="text-[#64748B] font-mono text-[11px] truncate max-w-sm">
+                            Supabase Storage: {selectedDocForModal.storedFilename || selectedDocForModal.originalName}
+                          </span>
+                          <a
+                            href={prescriptionImgUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[#2F7D78] hover:text-[#256B66] font-semibold inline-flex items-center gap-1 hover:underline text-xs"
+                          >
+                            <span>Open High-Res Scan</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center bg-[#F7F9FB] rounded-xl border border-dashed border-[#DCE4ED] space-y-2">
+                        <FileText className="w-10 h-10 text-[#94A3B8] mx-auto" />
+                        <h4 className="text-sm font-bold text-[#0F172A]">No Image Scan Attached</h4>
+                        <p className="text-xs text-[#64748B] max-w-sm mx-auto">
+                          This document was recorded directly through clinical EHR note entry without an uploaded scanned artifact.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Metadata Summary Pill Matrix */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-[#F7F9FB] rounded-xl border border-[#DCE4ED] text-xs">
+                      <div>
+                        <span className="text-[#64748B] block text-[10px] uppercase font-bold">Facility / Clinic</span>
+                        <span className="text-[#0F172A] font-semibold truncate block">
+                          {formatHospitalName(selectedDocForModal.structuredResult?.hospital)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#64748B] block text-[10px] uppercase font-bold">Physician</span>
+                        <span className="text-[#0F172A] font-semibold truncate block">
+                          {formatDoctorName(selectedDocForModal.structuredResult?.doctor)}
+                        </span>
+                      </div>
+                      <div className="col-span-2 sm:col-span-1">
+                        <span className="text-[#64748B] block text-[10px] uppercase font-bold">Record Status</span>
+                        <span className={!selectedDocForModal.isDraft ? "text-[#2F7D78] font-bold" : "text-[#92400E] font-bold"}>
+                          {selectedDocForModal.clinicalVerification}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 text-xs">
+                    <div className="p-3 bg-[#F7F9FB] rounded-xl border border-[#DCE4ED] space-y-2 font-mono">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#64748B]">Document Status:</span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            !selectedDocForModal.isDraft
+                              ? "bg-[#E8F6F4] text-[#2F7D78]"
+                              : "bg-[#FEF3C7] text-[#92400E]"
+                          }`}
+                        >
+                          {selectedDocForModal.clinicalVerification}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#64748B]">Upload Timestamp:</span>
+                        <span className="text-[#0F172A]">
+                          {selectedDocForModal.uploadedAt ? new Date(selectedDocForModal.uploadedAt).toLocaleString() : "Unknown"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between font-sans">
+                        <span className="text-[#64748B]">Facility / Clinic:</span>
+                        <span className="font-semibold text-[#0F172A]">{formatHospitalName(selectedDocForModal.structuredResult?.hospital)}</span>
+                      </div>
+                      {selectedDocForModal.structuredResult?.doctor ? (
+                        <div className="flex items-center justify-between font-sans">
+                          <span className="text-[#64748B]">Physician:</span>
+                          <span className="font-semibold text-[#0F172A]">{formatDoctorName(selectedDocForModal.structuredResult?.doctor)}</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {selectedDocForModal.summary && (
+                      <div className="p-3.5 bg-[#F7F9FB] rounded-xl border border-[#DCE4ED] text-[#334155] leading-relaxed">
+                        <span className="text-[10px] uppercase font-bold text-[#64748B] block mb-1">
+                          Structured Clinical Summary
+                        </span>
+                        {selectedDocForModal.summary}
+                      </div>
+                    )}
+
+                    {Array.isArray(selectedDocForModal.structuredResult?.medicines) &&
+                      selectedDocForModal.structuredResult.medicines.length > 0 && (
+                        <div className="p-3 bg-white rounded-xl border border-[#DCE4ED] space-y-2">
+                          <span className="text-[10px] uppercase font-bold text-[#64748B] block">
+                            Prescribed Medicines in Document ({selectedDocForModal.structuredResult.medicines.length})
+                          </span>
+                          <div className="space-y-1.5">
+                            {selectedDocForModal.structuredResult.medicines.map((med, idx) => {
+                              const medName = typeof med.name === "object" ? med.name?.val : med.name;
+                              const medStrength = typeof med.strength === "object" ? med.strength?.val : med.strength;
+                              const medFreq = typeof med.frequency === "object" ? med.frequency?.val : med.frequency;
+                              return (
+                                <div key={idx} className="p-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between text-xs">
+                                  <span className="font-bold text-[#0F172A]">{medName || "Medication"}</span>
+                                  <span className="text-[11px] text-[#64748B] font-mono">
+                                    {medStrength || ""} {medFreq ? `• ${medFreq}` : ""}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="pt-2 border-t border-[#DCE4ED] flex items-center justify-between shrink-0">
+                {prescriptionImgUrl ? (
+                  <a
+                    href={prescriptionImgUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 border border-[#DCE4ED] hover:bg-[#F1F5F9] text-[#0F172A] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open Scan in New Window</span>
+                  </a>
+                ) : <div />}
+                <button
+                  type="button"
+                  onClick={() => setSelectedDocForModal(null)}
+                  className="px-4 py-2 bg-[#2F7D78] text-white rounded-lg text-xs font-semibold hover:bg-[#256B66] transition-colors"
+                >
+                  Close Preview
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ==========================================
+          5. ALL ACTIVE MEDICATIONS MODAL
+          ========================================== */}
+      {isMedicationsModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 border border-[#DCE4ED] shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-[#DCE4ED] pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center">
+                  <Pill className="w-4 h-4 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-[#0F172A]">All Active Medications</h3>
+                  <p className="text-xs text-[#64748B]">
+                    Complete list of ongoing prescriptions for {patient?.name || "Patient"} ({safeMedications.active.length} total)
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedDocForModal(null)}
-                className="p-1 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9]"
+                onClick={() => setIsMedicationsModalOpen(false)}
+                className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"
               >
                 ✕
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-[#64748B]">Document Status:</span>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    !selectedDocForModal.isDraft
-                      ? "bg-[#E8F6F4] text-[#2F7D78]"
-                      : "bg-[#FEF3C7] text-[#92400E]"
-                  }`}
-                >
-                  {selectedDocForModal.clinicalVerification}
-                </span>
-              </div>
-              <div className="flex items-center justify-between font-mono">
-                <span className="text-[#64748B]">Upload Timestamp:</span>
-                <span>{new Date(selectedDocForModal.uploadedAt).toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#64748B]">Facility / Clinic:</span>
-                <span className="font-semibold">{formatHospitalName(selectedDocForModal.structuredResult?.hospital)}</span>
-              </div>
+            <div className="overflow-y-auto flex-1 pr-1 space-y-2.5">
+              {safeMedications.active.length > 0 ? (
+                safeMedications.active.map((m) => (
+                  <div key={m.id} className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-[#0F172A]">{m.name}</span>
+                        {m.strength && (
+                          <span className="text-[11px] font-mono text-[#64748B] bg-white px-2 py-0.5 rounded border border-[#DCE4ED]">
+                            {m.strength}
+                          </span>
+                        )}
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78]">
+                        Active
+                      </span>
+                    </div>
 
-              {selectedDocForModal.summary && (
-                <div className="p-3 bg-[#F7F9FB] rounded-xl border border-[#DCE4ED] text-[#334155] leading-relaxed">
-                  <span className="text-[10px] uppercase font-bold text-[#64748B] block mb-1">
-                    Structured Clinical Summary
-                  </span>
-                  {selectedDocForModal.summary}
-                </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-[#64748B] pt-1">
+                      <div>
+                        <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Frequency</span>
+                        <span className="text-[#0F172A] font-medium">{m.frequency || "As prescribed"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Route</span>
+                        <span className="text-[#0F172A] font-medium">{m.route || "Oral"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Prescriber</span>
+                        <span className="text-[#0F172A] font-medium truncate block">{formatDoctorName(m.doctor)}</span>
+                      </div>
+                      {m.start_date && (
+                        <div>
+                          <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Start Date</span>
+                          <span className="text-[#0F172A] font-medium">{m.start_date}</span>
+                        </div>
+                      )}
+                      {m.indication && (
+                        <div className="col-span-2">
+                          <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Indication</span>
+                          <span className="text-[#334155]">{m.indication}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-[#64748B] italic p-4 text-center">No active medications registered.</p>
               )}
             </div>
 
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 border-t border-[#DCE4ED] flex items-center justify-between shrink-0">
+              <Link
+                href="/patient/medicines"
+                target="_blank"
+                className="px-3 py-1.5 border border-[#DCE4ED] hover:bg-[#F1F5F9] text-[#0F172A] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+              >
+                <span>Full Medications Management Page</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
               <button
                 type="button"
-                onClick={() => setSelectedDocForModal(null)}
-                className="px-4 py-2 bg-[#2F7D78] text-white rounded-lg text-xs font-semibold hover:bg-[#256B66]"
+                onClick={() => setIsMedicationsModalOpen(false)}
+                className="px-4 py-2 bg-[#2F7D78] text-white rounded-lg text-xs font-semibold hover:bg-[#256B66] transition-colors"
               >
-                Close Preview
+                Close
               </button>
             </div>
           </div>
@@ -2220,7 +2717,9 @@ export default function DoctorPatientRecordPage() {
             <div className="space-y-3 text-xs">
               <div className="p-3 bg-[#FEF2F2] rounded-xl border border-[#FECACA]">
                 <span className="font-bold text-[#DC2626] block text-sm">{selectedDiscrepancy.name}</span>
-                <span className="text-[11px] font-mono text-[#991B1B]">Category: {selectedDiscrepancy.reconciliation_category}</span>
+                {selectedDiscrepancy.reconciliation_category && (
+                  <span className="text-[11px] font-mono text-[#991B1B]">Category: {selectedDiscrepancy.reconciliation_category}</span>
+                )}
                 <p className="text-[#7F1D1D] mt-2 leading-relaxed">
                   {selectedDiscrepancy.conflict_details || selectedDiscrepancy.reconciliation_notes || "Conflicting dosage or frequency detected between source records."}
                 </p>

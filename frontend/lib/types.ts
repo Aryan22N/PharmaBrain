@@ -230,6 +230,7 @@ export interface PatientAccessRequest {
   respondedAt?: string | null;
   revokedAt?: string | null;
   expiresAt?: string | null;
+  durationDays?: number | null;
 }
 
 

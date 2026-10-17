@@ -506,3 +506,41 @@ Doctor retrieves complete authorized medical dossier for an approved patient:
   - `medications`: Filtered into `active`, `history`, and `needsReview` (conflicts).
   - `observations`: Time-series vitals (blood pressure, glucose, HbA1c, etc.).
   - `longitudinalTrends`: Statistical trends and trajectory.
+
+---
+
+### Patient Consent, Access Revocation & Profile Endpoints
+
+#### `GET /api/patient/access-requests`
+Patient fetches all clinical consent requests received (pending, active authorizations, and past revocations):
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Auto-Revocation Engine**: Automatically updates status to `REVOKED` for any active authorization where `expires_at <= NOW()`.
+- **Response**: List of access requests with `status`, `durationDays`, and `expiresAt`.
+
+#### `POST /api/patient/access-requests/[id]/respond`
+Patient approves or declines an incoming doctor access request with automatic revocation expiry:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Input**: `{ "decision": "APPROVE" | "REJECT", "durationDays": 3 | 8 | 30 }`.
+- **Behavior**: When approving, sets `status = 'APPROVED'` and calculates `expires_at = NOW() + INTERVAL ' days'`.
+
+#### `POST /api/patient/access-requests/[id]/duration`
+Patient adjusts the auto-revoke duration for an already active doctor authorization:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Input**: `{ "durationDays": 3 | 8 | 30 }`.
+- **Behavior**: Recalculates `expires_at` from current time and updates active authorization.
+
+#### `POST /api/patient/access-requests/[id]/revoke`
+Patient terminates doctor clinical records access immediately:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Behavior**: Sets `status = 'REVOKED'` and `revoked_at = NOW()`. Doctor immediately loses access.
+
+#### `GET /api/user/profile`
+Fetches full patient profile, personal demographics, chronic conditions, and auto-revoke governance preferences:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Automatic Fallback & Backfill**: If `patient_demographics` is unpopulated, merges and backfills from `patient_onboarding`.
+- **Response**: Returns `{ user, demographics, conditions, customConditions, history, defaultAutoRevokeDays, visits }`.
+
+#### `PUT /api/user/profile`
+Updates patient demographics, chronic conditions, or default auto-revoke preference:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Two-Way Synchronization**: Automatically writes to both `patient_demographics` and `patient_onboarding` and updates `User.name`.
