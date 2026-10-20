@@ -73,12 +73,30 @@ export async function GET(
       `SELECT id, status, requested_at, responded_at, revoked_at, expires_at
        FROM patient_access_requests
        WHERE doctor_id = $1 AND patient_id = $2 AND status = 'APPROVED'
-         AND (expires_at IS NULL OR expires_at > NOW())
+       ORDER BY id DESC
        LIMIT 1;`,
       [doctor.id, patient.id]
     );
 
-    if (accessRows.length === 0) {
+    const activeAuthorization = accessRows[0];
+    const isExpired = Boolean(
+      activeAuthorization?.expires_at &&
+      !isNaN(Date.parse(activeAuthorization.expires_at)) &&
+      new Date(activeAuthorization.expires_at).getTime() <= Date.now()
+    );
+
+    if (!activeAuthorization || isExpired) {
+      if (isExpired && activeAuthorization) {
+        try {
+          await query(
+            `UPDATE patient_access_requests SET status = 'REVOKED', revoked_at = $1 WHERE id = $2;`,
+            [new Date().toISOString(), activeAuthorization.id]
+          );
+        } catch {
+          // ignore background revoke sync error
+        }
+      }
+
       // Check if there is an expired or otherwise non-active request to give precise clinical context
       const anyAccess = await query<{ status: string; expires_at: string | null }>(
         `SELECT status, expires_at
@@ -90,14 +108,15 @@ export async function GET(
       );
 
       const latestReq = anyAccess[0];
-      const isExpired = latestReq?.status === 'APPROVED' && latestReq.expires_at && new Date(latestReq.expires_at) <= new Date();
-      const latestStatus = isExpired ? 'EXPIRED' : latestReq?.status || 'NOT_REQUESTED';
+      const hasExpired = isExpired || (latestReq?.status === 'APPROVED' && latestReq.expires_at && !isNaN(Date.parse(latestReq.expires_at)) && new Date(latestReq.expires_at).getTime() <= Date.now());
+      const latestStatus = hasExpired ? 'EXPIRED' : latestReq?.status || 'NOT_REQUESTED';
+      const expiryDateStr = isExpired ? activeAuthorization?.expires_at : latestReq?.expires_at;
 
       return NextResponse.json(
         {
           error:
-            isExpired
-              ? `Forbidden: Clinical access has expired (auto-revoked on ${new Date(latestReq.expires_at!).toLocaleDateString()}). Please request updated patient consent.`
+            hasExpired
+              ? `Forbidden: Clinical access has expired (auto-revoked on ${expiryDateStr ? new Date(expiryDateStr).toLocaleDateString() : 'recent date'}). Please request updated patient consent.`
               : latestStatus === 'REVOKED'
               ? 'Forbidden: Patient has revoked your authorization to access medical records.'
               : latestStatus === 'PENDING'
@@ -111,8 +130,6 @@ export async function GET(
         { status: 403 }
       );
     }
-
-    const activeAuthorization = accessRows[0];
 
     // 4. Fetch Real Patient Medical Records
     const patientIds = Array.from(

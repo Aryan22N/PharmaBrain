@@ -21,16 +21,23 @@ export async function GET(req: NextRequest) {
       await query(`ALTER TABLE patient_access_requests ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;`);
       await query(`ALTER TABLE patient_access_requests ADD COLUMN IF NOT EXISTS duration_days INT DEFAULT 8;`);
       // Auto-revoke any active access requests whose expiration timestamp has elapsed
-      await query(
-        `UPDATE patient_access_requests
-         SET status = 'REVOKED',
-             revoked_at = NOW()
-         WHERE patient_id = $1 
-           AND status = 'APPROVED' 
-           AND expires_at IS NOT NULL 
-           AND expires_at <= NOW();`,
+      const approvedRows = await query<{ id: number; expires_at: string | null }>(
+        `SELECT id, expires_at FROM patient_access_requests WHERE patient_id = $1 AND status = 'APPROVED' AND expires_at IS NOT NULL;`,
         [patient.id]
       );
+      const expiredIds = approvedRows
+        .filter((r) => r.expires_at && !isNaN(Date.parse(r.expires_at)) && new Date(r.expires_at).getTime() <= Date.now())
+        .map((r) => r.id);
+
+      if (expiredIds.length > 0) {
+        await query(
+          `UPDATE patient_access_requests
+           SET status = 'REVOKED',
+               revoked_at = $1
+           WHERE id = ANY($2::int[]);`,
+          [new Date().toISOString(), expiredIds]
+        );
+      }
     } catch {
       // Ignore schema setup errors if columns exist
     }
