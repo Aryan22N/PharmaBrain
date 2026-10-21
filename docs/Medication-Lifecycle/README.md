@@ -292,6 +292,7 @@ stateDiagram-v2
     - Sets `actual_end_date = today`.
     - Saves the reason into `patient_medications.status_reason` and `patient_medications.discontinued_reason`.
     - Records an immutable audit entry in `patient_medication_audit` with `action = 'DISCONTINUED'`.
+    - **Automatic Allergy Synchronization**: If marked as discontinued due to an allergic reaction or hypersensitivity (`isAllergy: true`, `reasonCategory = 'ALLERGY'`, or allergy keywords in the reason), automatically registers the offending agent in `patient_allergies` and displays a `"Discontinued Medicine"` indicator badge on `/patient/overview`.
     - Moves the card to **Medical History** with a prominent red Discontinuation Reason banner.
 
 #### 4. Resume

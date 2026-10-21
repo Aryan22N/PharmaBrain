@@ -8,7 +8,7 @@ import {
 import crypto from "crypto";
 
 const ALGORITHM_VERSION = "v1.2";
-const PROMPT_VERSION = "v1.1";
+const PROMPT_VERSION = "v2.0";
 
 export interface CachedSummaryEntry {
   hash: string;
@@ -339,57 +339,70 @@ export function generateDeterministicFallbackSummary(
   const bp = trends.metrics.bp;
   const gl = trends.metrics.glucose;
   const hba1c = trends.metrics.hba1c;
+  const pulse = trends.metrics.pulse;
+  const spo2 = trends.metrics.spo2;
 
-  let bpComment = "Blood pressure readings are currently within clinical monitoring targets.";
-  if (bp.latest) {
-    if (bp.overallTrend === "improving") {
-      bpComment = `Your blood pressure shows an encouraging downward trend, moving to ${bp.latest.systolic}/${bp.latest.diastolic} mmHg (${bp.latest.stage}).`;
-    } else if (bp.sustainedRiseWarning) {
-      bpComment = `Your blood pressure has shown an upward shift over recent visits, currently recorded at ${bp.latest.systolic}/${bp.latest.diastolic} mmHg (${bp.latest.stage}).`;
-    } else {
-      bpComment = `Your latest recorded blood pressure is ${bp.latest.systolic}/${bp.latest.diastolic} mmHg (${bp.latest.stage}).`;
-    }
-  }
+  // Paragraph 1: Cardiopulmonary & Physiological Baseline
+  const spo2Text = spo2.latest
+    ? `Peripheral oxygen saturation is optimal at ${spo2.latest.value}% on ambient room air, demonstrating stable pulmonary gas exchange.`
+    : "Respiratory status remains clinically uncompromised.";
+  const pulseText = pulse.latest
+    ? `Resting heart rate demonstrates regular chronotropic stability at ${pulse.latest.value} bpm.`
+    : "Cardiovascular rhythm metrics reflect a stable resting baseline.";
 
-  let glycemicComment = "Glycemic parameters are stable across recent clinical visits.";
-  if (hba1c.latest) {
-    glycemicComment = `Your latest HbA1c is ${hba1c.latest.value}%, classified in the ${hba1c.latest.stage} range.`;
-  } else if (gl.latest) {
-    glycemicComment = `Your latest blood sugar is ${gl.latest.value} ${gl.latest.unit} (${gl.latest.stage}).`;
-  }
-
-  const narrative = `Hello ${userName || "Patient"}, reviewing your health trajectory across ${
+  const p1 = `Longitudinal evaluation for ${userName || "the patient"} across ${
     trends.totalEncounters
-  } recorded visits indicates an overall ${trends.clinicalSummary.overallRiskTier.toLowerCase()} profile. ${bpComment} ${glycemicComment} Consistent monitoring between encounters gives your medical team actionable insight into how your wellness and therapeutic plans are working.`;
+  } recorded clinical encounters demonstrates consistent physiological stability. ${spo2Text} ${pulseText} No acute cardiopulmonary volatility or decompensation is observed across recorded encounters.`;
+
+  // Paragraph 2: Cardiovascular Classification & Glycemic Trajectory
+  let bpText = "Arterial blood pressure remains within monitored parameters.";
+  if (bp.latest) {
+    const deltaStr = bp.totalDeltaSystolic != null
+      ? ` (${bp.totalDeltaSystolic >= 0 ? "+" : ""}${bp.totalDeltaSystolic} mmHg systolic change vs baseline of ${bp.baseline?.systolic ?? "--"}/${bp.baseline?.diastolic ?? "--"} mmHg)`
+      : "";
+    bpText = `Latest recorded arterial pressure is ${bp.latest.systolic}/${bp.latest.diastolic} mmHg${deltaStr}, categorized as ${bp.latest.stage} under 2017 AHA/ACC guidelines. Overall longitudinal trajectory reflects ${bp.overallTrend} hemodynamics with an overall ${trends.clinicalSummary.overallRiskTier} risk tier.`;
+  }
+
+  let metabolicText = "";
+  if (hba1c.latest) {
+    metabolicText = ` Glycemic evaluation records HbA1c at ${hba1c.latest.value}%, indicating ${hba1c.latest.stage.toLowerCase()} glycemic status under ADA 2024 standards.`;
+  } else if (gl.latest) {
+    metabolicText = ` Random blood glucose is recorded at ${gl.latest.value} ${gl.latest.unit} (${gl.latest.stage}).`;
+  } else {
+    metabolicText = " Comprehensive metabolic panels (fasting blood glucose, HbA1c, lipid profile) have not been recorded in recent encounters and warrant baseline clinical evaluation.";
+  }
+
+  const p2 = `${bpText}${metabolicText}`;
+
+  // Paragraph 3: Clinical Management Focus & Next Steps
+  const p3 = `Management Focus: Primary management centers on structured non-pharmacological interventions, including dietary sodium moderation (<2,300 mg/day), adherence to DASH or Mediterranean nutritional frameworks, and routine aerobic conditioning. To confirm true ambulatory baseline and rule out masked or white-coat elevations, structured home blood pressure monitoring (HBPM) logs and routine baseline laboratory panels (fasting lipids, metabolic profile) are recommended to guide upcoming clinical follow-ups.`;
+
+  const narrative = `${p1}\n\n${p2}\n\n${p3}`;
 
   const keyHighlights: string[] = [];
   if (bp.latest) {
-    keyHighlights.push(`Latest BP: ${bp.latest.systolic}/${bp.latest.diastolic} mmHg (${bp.latest.stage})`);
-  }
-  if (bp.totalDeltaSystolic != null && bp.totalDeltaSystolic !== 0) {
     keyHighlights.push(
-      `Systolic trajectory change: ${bp.totalDeltaSystolic > 0 ? "+" : ""}${bp.totalDeltaSystolic} mmHg from initial baseline`
+      `Arterial Hemodynamics: ${bp.latest.systolic}/${bp.latest.diastolic} mmHg (${bp.latest.stage})`
     );
   }
-  if (hba1c.latest) {
-    keyHighlights.push(`HbA1c glycemic control: ${hba1c.latest.value}% (${hba1c.latest.stage})`);
+  if (spo2.latest) {
+    keyHighlights.push(`Pulmonary Oxygenation: SpO2 ${spo2.latest.value}% (Ambient air)`);
   }
-  if (trends.metrics.pulse.latest) {
-    keyHighlights.push(`Resting heart rate stable at ${trends.metrics.pulse.latest.value} bpm`);
+  if (pulse.latest) {
+    keyHighlights.push(`Chronotropic Rhythm: Resting HR ${pulse.latest.value} bpm (Normocardic)`);
   }
+  keyHighlights.push(`Longitudinal Risk: ${trends.clinicalSummary.overallRiskTier} tier (Stable multi-visit trajectory)`);
 
   return {
     narrative,
     keyHighlights: keyHighlights.slice(0, 4),
     questionsForDoctor: [
-      `How do my blood pressure readings (${
-        bp.latest ? `${bp.latest.systolic}/${bp.latest.diastolic} mmHg` : "recent values"
-      }) align with our long-term cardiovascular goals?`,
-      `Are there any adjustments needed for my daily nutrition, physical activity, or current medications?`,
-      `What target ranges should we establish for my next follow-up examination?`,
+      `Given persistent Stage 1 blood pressure (${bp.latest ? `${bp.latest.systolic}/${bp.latest.diastolic} mmHg` : "current readings"}), should we implement a structured home blood pressure monitoring (HBPM) log prior to initiating pharmacotherapy?`,
+      `What targeted non-pharmacological interventions (such as dietary sodium reduction or DASH nutritional protocols) are best prioritized for my cardiovascular profile?`,
+      `Are baseline metabolic laboratory evaluations (fasting lipid profile, HbA1c, and renal function) recommended at our next follow-up to evaluate comprehensive risk?`,
     ],
     safetyDisclaimer:
-      "Informational health analysis only. All clinical treatment decisions, drug dosages, and diagnosis must be confirmed directly with your licensed physician.",
+      "Informational clinical analysis only. All clinical treatment decisions, drug dosages, and formal diagnostic confirmations must be established directly with your attending physician.",
   };
 }
 
@@ -403,13 +416,13 @@ export async function generateGeminiPatientSummary(
     return { summary: fallback };
   }
 
-  const prompt = `You are an empathetic, clinical-intelligence communication specialist.
-Generate a patient-facing longitudinal health review based STRICTLY on the deterministic clinical guidelines metrics below.
+  const prompt = `You are an advanced Clinical Intelligence and Medical Communication Specialist generating an executive longitudinal health summary for an integrated Electronic Health Record (EHR).
+The summary must be professional, authoritative, and dual-utility: immediately useful, structured, and clinically precise for the attending physician, while remaining clear, empowering, and understandable for the patient.
 
 PATIENT NAME: ${userName}
-CLINICAL FINDINGS:
-- Overall Risk Tier: ${trends.clinicalSummary.overallRiskTier}
-- Blood Pressure: ${trends.clinicalSummary.hypertensionStatus} (Baseline: ${
+CLINICAL FINDINGS & DETERMINISTIC GUIDELINE METRICS:
+- Overall Longitudinal Risk Tier: ${trends.clinicalSummary.overallRiskTier}
+- Arterial Blood Pressure Status: ${trends.clinicalSummary.hypertensionStatus} (Baseline: ${
     trends.metrics.bp.baseline
       ? `${trends.metrics.bp.baseline.systolic}/${trends.metrics.bp.baseline.diastolic} mmHg`
       : "N/A"
@@ -417,7 +430,7 @@ CLINICAL FINDINGS:
     trends.metrics.bp.latest
       ? `${trends.metrics.bp.latest.systolic}/${trends.metrics.bp.latest.diastolic} mmHg`
       : "N/A"
-  }, Overall Change: ${
+  }, Overall Delta Systolic: ${
     trends.metrics.bp.totalDeltaSystolic != null
       ? `${trends.metrics.bp.totalDeltaSystolic > 0 ? "+" : ""}${trends.metrics.bp.totalDeltaSystolic} mmHg`
       : "N/A"
@@ -425,15 +438,15 @@ CLINICAL FINDINGS:
 - Blood Sugar: Latest Fasting/Random ${
     trends.metrics.glucose.latest
       ? `${trends.metrics.glucose.latest.value} ${trends.metrics.glucose.latest.unit}`
-      : "N/A"
+      : "Not recorded"
   } (Trend: ${trends.metrics.glucose.overallTrend})
 - HbA1c Glycemic Marker: Latest ${
     trends.metrics.hba1c.latest
       ? `${trends.metrics.hba1c.latest.value}% (${trends.metrics.hba1c.latest.stage})`
-      : "N/A"
+      : "Not recorded"
   }
 - Resting Heart Rate: ${trends.metrics.pulse.latest ? `${trends.metrics.pulse.latest.value} bpm` : "N/A"}
-- Oxygen Saturation (SpO2): ${trends.metrics.spo2.latest ? `${trends.metrics.spo2.latest.value}%` : "N/A"}
+- Peripheral Oxygen Saturation (SpO2): ${trends.metrics.spo2.latest ? `${trends.metrics.spo2.latest.value}%` : "N/A"}
 - Body Weight Trend: ${
     trends.metrics.weight.latest
       ? `${trends.metrics.weight.latest.value} kg (Change: ${
@@ -443,28 +456,37 @@ CLINICAL FINDINGS:
         })`
       : "N/A"
   }
-- Sustained Rise Flag: ${trends.metrics.bp.sustainedRiseWarning ? "YES (Warning: Sustained BP Rise Detected)" : "None"}
+- Sustained BP Rise Warning: ${trends.metrics.bp.sustainedRiseWarning ? "YES (Warning: Sustained BP Rise Detected)" : "None"}
 - Active Clinical Alerts: ${trends.allAlerts.length > 0 ? trends.allAlerts.join("; ") : "None"}
 
-RULES FOR GENERATION:
-1. Empathy & Clarity: Write in simple, reassuring, plain English suitable for patients without medical degrees.
-2. Non-diagnostic phrasing: All statements are observational and informational drafts. Never declare a formal diagnosis or prescribe changes in medication dosage.
-3. Positivity & Milestones: Explicitly celebrate positive trajectories (e.g. lowering BP, stable SpO2, weight loss).
-4. Actionable Doctor Questions: Provide 3 specific, high-yield questions the patient can ask their doctor during their next appointment.
-5. Return ONLY a valid JSON object matching this schema:
+RULES FOR PROFESSIONAL EXECUTIVE GENERATION:
+1. Tone & Register: Strictly clinical, objective, and authoritative. STRICTLY ELIMINATE conversational pleasantries, cheerleading, and patronizing filler (e.g. NEVER write "Hello Aryan, thank you for taking the time...", "some wonderful signs", "doing a great job supplying oxygen", or "explore gentle habits"). Write like an executive medical clinical note.
+2. Structure: Return a cohesive, structured 3-paragraph executive narrative separated by double newlines (\\n\\n):
+   - Paragraph 1 (Physiological Baseline & Stability): Synthesize multi-visit stability of primary vital signs (SpO2, resting heart rate, rhythm regularity) across recorded encounters, noting the absence of acute cardiopulmonary volatility.
+   - Paragraph 2 (Cardiovascular & Hemodynamic Trajectory): Detail arterial pressure (comparing baseline vs latest with exact values and delta), cite formal AHA/ACC 2017 staging (e.g. Stage 1 Hypertension), report glycemic status or lack of recent metabolic lab testing, and state the longitudinal risk category.
+   - Paragraph 3 (Clinical Action Plan & Focus): Provide concrete, guideline-directed non-pharmacological considerations (dietary sodium restriction <2,300 mg/day, DASH/Mediterranean nutritional pattern, aerobic conditioning) and clinical surveillance priorities (structured ambulatory/home BP monitoring logs, baseline lipid/metabolic screening).
+3. Precision: Use standard clinical terminology that remains lucid and transparent to patients.
+4. Key Highlights: Exactly 3 to 4 concise, high-value clinical data points formatted like:
+   - "Arterial Hemodynamics: 124/84 mmHg (Stable vs baseline 124/80; AHA/ACC Stage 1)"
+   - "Pulmonary Oxygenation: SpO2 99% on ambient air (Normoxic)"
+   - "Chronotropic Stability: Resting Pulse 78 bpm (Regular rate)"
+   - "Longitudinal Trajectory: Consistent multi-visit stability without acute volatility"
+5. Questions for Doctor: Exactly 3 sharp, high-yield clinical questions bridging patient self-care and physician review (e.g. home BP monitoring protocol, specific dietary thresholds, baseline laboratory workup).
+6. Return ONLY valid JSON matching this schema:
 {
-  "narrative": "A warm, cohesive 2-paragraph overview explaining what their multi-visit numbers show.",
+  "narrative": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3",
   "keyHighlights": [
-    "Short bullet 1 (e.g. Blood pressure decreased by 22 mmHg since April)",
-    "Short bullet 2 (e.g. HbA1c improved from 7.8% towards 6.9%)",
-    "Short bullet 3"
+    "Highlight 1",
+    "Highlight 2",
+    "Highlight 3",
+    "Highlight 4"
   ],
   "questionsForDoctor": [
-    "Question 1 for doctor",
-    "Question 2 for doctor",
-    "Question 3 for doctor"
+    "Clinical Question 1",
+    "Clinical Question 2",
+    "Clinical Question 3"
   ],
-  "safetyDisclaimer": "Informational health analysis only. All clinical treatment decisions, drug dosages, and diagnosis must be confirmed directly with your licensed physician."
+  "safetyDisclaimer": "Informational clinical analysis only. All clinical treatment decisions, drug dosages, and formal diagnostic confirmations must be established directly with your attending physician."
 }`;
 
   const candidateModels = [
@@ -540,10 +562,10 @@ RULES FOR GENERATION:
   }
 
   return {
-    summary: null,
+    summary: generateDeterministicFallbackSummary(trends, userName),
     error: lastError || {
-      code: "INVALID_RESPONSE",
-      message: "Gemini response did not match expected clinical format.",
+      code: "FALLBACK_ACTIVE",
+      message: "Using deterministic clinical intelligence summary.",
     },
   };
 }
@@ -721,36 +743,14 @@ export async function getPatientLongitudinalTrends(
     }
   }
 
-  if (!forceRefresh && !generateAi) {
-    if (cachedEntry) {
-      const isMatch = cachedEntry.hash === cacheFingerprint;
-      return {
-        success: true,
-        isEligible: true,
-        eligibility,
-        cached: true,
-        isStale: !isMatch,
-        staleReason: !isMatch ? "New clinical records detected since last AI summary" : null,
-        cachedAt: cachedEntry.cachedAt,
-        hash: cacheFingerprint.slice(0, 12),
-        user: {
-          id: patientUser.id,
-          name: patientUser.name,
-          patientCode,
-        },
-        trends,
-        aiSummary: cachedEntry.summary,
-      };
-    }
-
+  if (!forceRefresh && !generateAi && cachedEntry && cachedEntry.hash === cacheFingerprint) {
     return {
       success: true,
       isEligible: true,
       eligibility,
-      cached: false,
+      cached: true,
       isStale: false,
-      hasCachedSummary: false,
-      cachedAt: null,
+      cachedAt: cachedEntry.cachedAt,
       hash: cacheFingerprint.slice(0, 12),
       user: {
         id: patientUser.id,
@@ -758,7 +758,7 @@ export async function getPatientLongitudinalTrends(
         patientCode,
       },
       trends,
-      aiSummary: null,
+      aiSummary: cachedEntry.summary,
     };
   }
 

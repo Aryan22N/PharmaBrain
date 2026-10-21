@@ -461,16 +461,41 @@ export function LongitudinalTrendsDashboard({
           {/* STATE 5 & 6: Cached or Fresh Narrative Output */}
           {aiSummary && !refreshingAi && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 space-y-3">
-                <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line">
-                  {aiSummary.narrative}
-                </p>
+              <div className="lg:col-span-2 space-y-3.5">
+                <div className="space-y-3">
+                  {aiSummary.narrative
+                    .split(/\n\n+/)
+                    .map((paragraph: string, pIdx: number) => {
+                      const trimmed = paragraph.trim();
+                      if (!trimmed) return null;
+                      const match = trimmed.match(/^([^:]+:)\s*(.*)$/);
+                      if (
+                        match &&
+                        (match[1].toLowerCase().includes("management") ||
+                          match[1].toLowerCase().includes("clinical") ||
+                          match[1].toLowerCase().includes("trajectory") ||
+                          match[1].toLowerCase().includes("evaluation"))
+                      ) {
+                        return (
+                          <p key={pIdx} className="text-xs text-slate-700 leading-relaxed">
+                            <strong className="text-slate-900 font-bold">{match[1]}</strong>{" "}
+                            {match[2]}
+                          </p>
+                        );
+                      }
+                      return (
+                        <p key={pIdx} className="text-xs text-slate-700 leading-relaxed">
+                          {trimmed}
+                        </p>
+                      );
+                    })}
+                </div>
 
                 {/* Highlights Pill Tags */}
                 {aiSummary.keyHighlights && aiSummary.keyHighlights.length > 0 && (
                   <div className="pt-2">
                     <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Key Trajectory Milestones
+                      Key Clinical Trajectory Markers
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {aiSummary.keyHighlights.map((hl: string, idx: number) => (
@@ -491,7 +516,7 @@ export function LongitudinalTrendsDashboard({
               <div className="bg-white/90 backdrop-blur-xs p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-2.5">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-900 border-b border-slate-100 pb-2">
                   <HelpCircle className="w-4 h-4 text-[#008080]" />
-                  <span>{isDoctorView ? "Patient Consultation Questions" : "Questions for Your Next Doctor Visit"}</span>
+                  <span>{isDoctorView ? "Clinical Consultation Focus & Questions" : "Questions for Your Next Doctor Visit"}</span>
                 </div>
                 <ul className="space-y-2">
                   {(aiSummary.questionsForDoctor || []).map((q: string, idx: number) => (

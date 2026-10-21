@@ -252,6 +252,56 @@ Unpolished UI with duplicate labels and unformatted patient names.
 
 ---
 
+### [KI-22] Blank Patient Profile Settings and Unsynced Demographics — ✅ RESOLVED
+
+**Evidence:**
+- On `/patient/settings`, patient demographic fields (phone, address, emergency contact, date of birth, blood group) were blank even after completing the 4-step onboarding wizard.
+- Onboarding information was stored in `patient_onboarding` but not synced with `patient_demographics` or `"User"`.
+- Doctor access requests granted indefinite access with no automatic expiration.
+
+**Impact:**
+Patients had to re-type demographics repeatedly, and doctors maintained perpetual access to patient records without expiration.
+
+**Fix:**
+- Created `patient_demographics` table with full contact, emergency, and auto-revoke governance columns.
+- Implemented bidirectional synchronization in `POST /api/user/onboarding`, `GET /api/user/profile`, and `PUT /api/user/profile`.
+- Enriched `GET /api/user/dashboard` to serve live synced demographics.
+- Added time-bound doctor consent (3, 8, 30 days) with automatic revocation enforcement on `expires_at <= NOW()`.
+
+---
+
+### [KI-23] Disconnected Trends Architecture and Duplicate Implementation — ✅ RESOLVED
+
+**Evidence:**
+- Trend analysis calculation and AI prompting were tightly coupled to `frontend/app/api/patient/trends/route.ts` and `frontend/app/patient/trends/page.tsx`.
+- The doctor patient view (`/doctor/patients/[patientId]`) lacked access to the longitudinal health trends engine.
+- Gemini prompting used a casual, conversational tone with patronizing filler unsuitable for clinical consultation.
+
+**Impact:**
+Doctors could not view longitudinal biomarker trajectory and risk prediction charts, and code could not be reused across patient and doctor views.
+
+**Fix:**
+- Extracted all trends math, eligibility gating, cache fingerprinting, and prompting into `frontend/lib/trendsService.ts`.
+- Built unified `LongitudinalTrendsDashboard.tsx` component with `isDoctorView` prop, serving both portals.
+- Implemented `GET /api/doctor/patients/[patientId]/trends` with strict doctor session and patient consent verification.
+- Upgraded Gemini synthesis to v2.0 executive format: structured 3-paragraph clinical synopsis with deterministic rule-based fallback.
+
+---
+
+### [KI-24] Clinical Vitals and Conditions Lacking Contextual Reference Information — ✅ RESOLVED
+
+**Evidence:**
+- On `/doctor/patients/[patientId]`, conditions, vitals, and laboratory biomarkers were displayed as unannotated text strings without diagnostic criteria, reference intervals, or clinical interpretation notes.
+
+**Impact:**
+Clinicians had to look up reference ranges externally or lacked standardized criteria during multi-disciplinary consultations.
+
+**Fix:**
+- Created comprehensive clinical reference dictionary `frontend/lib/medicalDescriptions.ts` covering 6 primary vitals, 13 laboratory biomarkers, and 10 chronic conditions.
+- Integrated interactive slide-over reference drawers, click-to-view condition modals, and clinical interpretation notes into `frontend/app/doctor/patients/[patientId]/page.tsx`.
+
+---
+
 ## UNVERIFIED Items (Documentation Gaps)
 
 | Item | Location | What needs verification |

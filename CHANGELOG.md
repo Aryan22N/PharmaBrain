@@ -8,6 +8,45 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- 2026-10-21 — Longitudinal Trends Engine Refactoring, Unified Trends Dashboard & Executive AI Synthesis v2.0:
+  - **Reusable Longitudinal Trends Service (`frontend/lib/trendsService.ts`)**:
+    - Extracted all trends calculation, eligibility verification, encounter normalization, cache fingerprinting, and Gemini AI synthesis from `/api/patient/trends/route.ts` into a unified, server-side core library `trendsService.ts`.
+    - Added automatic generation of executive AI summaries when an eligible patient lacks a cached narrative, eliminating extra clicks.
+    - Implemented `generateDeterministicFallbackSummary` with clinical rules, providing 100% resilience when Gemini API is throttled (HTTP 429), times out, or receives unexpected responses.
+  - **Unified Reusable Trends Component (`frontend/components/trends/LongitudinalTrendsDashboard.tsx`)**:
+    - Created a full-featured, responsive trends dashboard component supporting both Patient Portal (`/patient/trends`) and Doctor Portal (`/doctor/patients/[patientId]`) views via `isDoctorView` prop.
+    - Features full 8-state UI lifecycle, eligibility progress bars, interactive multi-metric SVG trajectory charts with AHA/ACC and ADA clinical target reference bands, sustained BP rise warnings, encounter timeline log, and one-click prescription scan preview modals.
+  - **Doctor Longitudinal Trends Endpoint (`GET /api/doctor/patients/[patientId]/trends`)**:
+    - Created doctor-specific trends endpoint guarded by `requireDoctorSession`.
+    - Validates unexpired, approved patient consent in `patient_access_requests` (`status = 'APPROVED' AND expires_at > NOW()`), strictly enforcing a 403 Forbidden lock if authorization is revoked or expired.
+    - Supports `?force=true` (cache bypass) and `?generate=true`.
+  - **Executive Clinical AI Synthesis v2.0 (`PROMPT_VERSION = "v2.0"`)**:
+    - Updated prompt structure from conversational/plain text to an objective, authoritative 3-paragraph executive clinical synopsis:
+      1. *Physiological Baseline & Stability*: Multi-visit stability across primary vitals (SpO2, resting pulse, rhythm regularity) and absence of acute cardiopulmonary volatility.
+      2. *Cardiovascular & Hemodynamic Trajectory*: Arterial blood pressure comparison (baseline vs latest with exact values and delta), formal AHA/ACC 2017 staging, ADA glycemic categorization, and longitudinal risk tier.
+      3. *Clinical Action Plan & Surveillance Priorities*: Guideline-directed non-pharmacological considerations (dietary sodium restriction <2,300 mg/day, DASH nutritional pattern, aerobic conditioning) and structured monitoring priorities (home BP logs, baseline metabolic/lipid panels).
+    - Includes 3–4 high-yield clinical trajectory highlights and 3 actionable consultation questions for attending physicians.
+
+- 2026-10-21 — Clinical Reference Dictionary & Enhanced Doctor Patient View:
+  - **Clinical Reference Dictionary (`frontend/lib/medicalDescriptions.ts`)**:
+    - Implemented comprehensive clinical reference registry covering primary vitals (Blood Pressure, Heart Rate, SpO2, Temperature, Respiratory Rate, BMI), key laboratory biomarkers (HbA1c, Fasting Blood Glucose, Postprandial Glucose, Total Cholesterol, LDL, HDL, Triglycerides, Serum Creatinine, eGFR, ALT, AST, Hemoglobin, WBC, Platelets), and chronic conditions (Type 2 Diabetes, Essential Hypertension, Coronary Artery Disease, Dyslipidemia, Hypothyroidism, Asthma/COPD, Chronic Kidney Disease, GERD, Osteoarthritis, Migraine).
+    - Details target ranges, clinical significance, diagnostic criteria, and physician interpretation guidelines for every entry.
+  - **Doctor Patient Details Page Enhancement (`frontend/app/doctor/patients/[patientId]/page.tsx`)**:
+    - Re-architected doctor patient dossier with interactive clinical reference modals/drawers for active conditions, allergen hypersensitivities, and prescribed medications with full pharmacology and mechanism notes.
+    - Integrated `<LongitudinalTrendsDashboard isDoctorView={true} />` directly under `#biomarkers` tab.
+    - Added streamlined clinical tabs (Overview, Medications, Prescriptions & Scans, Vitals, Trends) with patient authorization checks and dynamic consent badges.
+
+- 2026-10-20 — Doctor Patient Records & Patient Access Request Endpoint Improvements:
+  - Hardened access verification on `GET /api/doctor/patients/[patientId]/records` and `GET /api/patient/access-requests`.
+  - Ensured patient consent auto-revocation triggers reliably and synchronizes across all doctor access endpoints.
+
+- 2026-10-14 — Patient Overview Allergies & Medication Sync:
+  - Added modify (pencil) and delete (trash) action buttons with interactive modals to the "My Allergies" card on `/patient/overview`.
+  - Implemented `/api/patient/allergies` (`GET`, `POST`) and `/api/patient/allergies/[id]` (`PATCH`, `DELETE`) with soft-delete support (`is_deleted` column).
+  - Automatically create/sync allergy records into `patient_allergies` when a medicine is discontinued due to an allergic reaction on `/patient/medicines`.
+  - Added "Discontinued Medicine" indicator badge on overview allergies list and on-mount data refresh to reflect real-time updates.
+  - Updated heading on `/patient/trends` to "Longitudinal Health Summary".
+
 - 2026-10-17 — Automated Doctor Consent Expiration, Patient Profile Demographics Sync & Layout Polish:
   - **Clinical Consent Governance & Automated Expiration**:
     - Enhanced `/patient/sharing` with a modernized 2-column layout and 4 real-time KPI metrics (Active Doctors, Pending Requests, Default Policy, Revocation History) queried directly from Supabase PostgreSQL without mock data.

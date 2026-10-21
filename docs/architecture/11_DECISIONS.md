@@ -269,3 +269,72 @@ Enforce strict provenance attribution across all API routes, database records, a
 - Clinicians and patients can reliably distinguish between hospital-integrated records and patient-scanned physical documents.
 - Protects clinical audit integrity.
 
+---
+
+## ADR-013 — Unified Longitudinal Trends Engine & Reusable Dashboard Component
+
+**Date:** 2026-10-21  
+**Status:** Accepted
+
+**Context:**  
+Longitudinal biomarker trend calculations, eligibility gating ($\ge 5$ distinct clinical dates), dual-layer cache fingerprinting, and Gemini AI synthesis were previously tightly coupled to `/api/patient/trends/route.ts` and `/patient/trends/page.tsx`. Clinicians navigating to the Doctor Portal (`/doctor/patients/[patientId]`) lacked access to the longitudinal health trends and risk prediction suite, resulting in code duplication and architectural fragmentation.
+
+**Decision:**  
+1. Extract all trend evaluation, deterministic clinical staging (AHA/ACC BP and ADA glycemia), cache management, and AI prompt generation into a core server library: `frontend/lib/trendsService.ts`.
+2. Construct a unified, presentationally decoupled component `frontend/components/trends/LongitudinalTrendsDashboard.tsx` parameterized via `isDoctorView` prop, serving both `/patient/trends` and `/doctor/patients/[patientId]`.
+3. Create doctor-specific endpoint `GET /api/doctor/patients/[patientId]/trends` protected by `requireDoctorSession` and verified patient consent checks in `patient_access_requests`.
+4. Implement Executive AI Synthesis v2.0 (`PROMPT_VERSION = "v2.0"`) with a structured 3-paragraph executive synopsis and deterministic rule fallback for guaranteed availability.
+
+**Evidence:** Confirmed — `frontend/lib/trendsService.ts`, `frontend/components/trends/LongitudinalTrendsDashboard.tsx`, `frontend/app/api/doctor/patients/[patientId]/trends/route.ts`.
+
+**Consequences:**
+- Single source of truth for all clinical trajectory and risk prediction logic.
+- Zero duplication of SVG charting, reference band styling, or state machine handling.
+- Doctors and patients view identical, synchronized longitudinal biomarker trajectories.
+
+---
+
+## ADR-014 — Authoritative Clinical Reference Dictionary for Conditions and Biomarkers
+
+**Date:** 2026-10-21  
+**Status:** Accepted
+
+**Context:**  
+The clinical dossier on `/doctor/patients/[patientId]` displayed diagnoses, active conditions, and vitals as raw text strings without standardized normal reference ranges, physiological interpretation guidance, or clinical significance context for junior clinicians or multi-disciplinary care teams.
+
+**Decision:**  
+Build a standardized clinical reference dictionary in `frontend/lib/medicalDescriptions.ts`:
+1. Comprehensive coverage for 6 primary vitals (BP, Heart Rate, SpO2, Temperature, Respiratory Rate, BMI).
+2. Quantitative reference ranges and interpretation for 13 essential laboratory biomarkers (HbA1c, Fasting Blood Glucose, Postprandial Glucose, Total Cholesterol, LDL, HDL, Triglycerides, Serum Creatinine, eGFR, ALT, AST, Hemoglobin, Platelets).
+3. Diagnostic criteria and pathophysiology for 10 common chronic conditions (Type 2 Diabetes, Hypertension, Coronary Artery Disease, Dyslipidemia, Hypothyroidism, COPD/Asthma, CKD, GERD, Osteoarthritis, Migraine).
+4. Interactive clinical reference drawers and tooltips in `/doctor/patients/[patientId]/page.tsx`.
+
+**Evidence:** Confirmed — `frontend/lib/medicalDescriptions.ts`, `frontend/app/doctor/patients/[patientId]/page.tsx`.
+
+**Consequences:**
+- Clinicians have immediate, in-context reference criteria during consultations.
+- Standardized terminology aligns with international clinical guidelines.
+
+---
+
+## ADR-015 — Time-Bound Doctor Access & Automatic Revocation Engine
+
+**Date:** 2026-10-17  
+**Status:** Accepted
+
+**Context:**  
+Under digital healthcare privacy standards (e.g. DPDPA 2023), indefinite doctor access to patient health records poses a substantial privacy risk. Patients require granular control to grant time-limited consultation access that expires automatically.
+
+**Decision:**  
+1. Enhance `patient_access_requests` table with `duration_days` (3, 8, 30 days) and `expires_at` timestamp columns.
+2. Enforce auto-revocation on read queries: any `APPROVED` request where `expires_at <= NOW()` is proactively updated to `REVOKED`.
+3. Guard both `GET /api/doctor/patients/[patientId]/records` and `GET /api/doctor/patients/[patientId]/trends` with strict checks: if access is expired or revoked, return `403 Forbidden` (`authorized: false`).
+4. Provide patients with dynamic in-flight duration adjustments (`PATCH /api/patient/access-requests/[id]/duration`) and instant one-click revocation.
+
+**Evidence:** Confirmed — `frontend/app/api/patient/access-requests/route.ts`, `frontend/app/api/doctor/patients/[patientId]/records/route.ts`, `frontend/app/api/doctor/patients/[patientId]/trends/route.ts`.
+
+**Consequences:**
+- Protects patient privacy with automatic expiration.
+- Eliminates perpetual unauthorized clinical record access.
+
+

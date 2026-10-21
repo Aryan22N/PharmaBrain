@@ -79,10 +79,14 @@ flowchart TD
 | MedicineEditor | `frontend/components/MedicineEditor.tsx` | Interactive medicine field editor before confirmation | React |
 | Medication Lifecycle Engine | `frontend/lib/medicationLifecycle.ts` | Generalized reconciliation engine across prescriptions, multi-doctor orders, continuation detection, duration parsing & conflict tracking | TypeScript, Levenshtein, Regex |
 | Medication Management UI | `frontend/app/patient/medicines/` | Patient medication dashboard, status transition modals, and source prescription image inspector | React, Lucide, TailwindCSS 4 |
-| Longitudinal Trend Engine | `frontend/lib/trendAnalysis.ts` & `frontend/lib/trends.ts` | 5-date gating, statistical trajectory, reference band classification, dual-tier cache | TypeScript, SVG, Gemini API |
+| Longitudinal Trend Engine & Service | `frontend/lib/trendsService.ts` & `frontend/lib/trends.ts` | 5-date gating, statistical multi-visit trajectory, AHA/ACC & ADA classification, dual-tier SHA-256 cache, and executive AI synthesis v2.0 | TypeScript, Gemini API, SVG |
+| Reusable Trends Dashboard | `frontend/components/trends/LongitudinalTrendsDashboard.tsx` | Unified trends UI for both Patient Portal (`/patient/trends`) and Doctor Dashboard (`/doctor/patients/[id]`) | React, Lucide, SVG Charts |
+| Doctor Patient Portal & Consent | `frontend/app/doctor/patients/[patientId]/` | Authorized clinical dossier, rapid diagnostic snapshot, verified patient consent checking, and longitudinal biomarker tracking | Next.js App Router, React |
+| Medical Description Dictionary | `frontend/lib/medicalDescriptions.ts` | Comprehensive clinical reference for active conditions, allergen hypersensitivities, and drug pharmacology modals | TypeScript |
+| Patient Allergy Management | `frontend/app/api/patient/allergies/` | Full CRUD, soft-deletion, and automatic adverse drug reaction sync on medication discontinuation | Next.js Route Handlers, PostgreSQL |
 | Bulk importer | `model/import_medicines_bulk.py` | High-speed batch import of CSV/JSON datasets into `medicine_master` | SQLAlchemy, csv |
 | Standalone OCR server | `app.py` | Minimal OCR endpoint — raw bounding boxes only, no LLM, no DB | FastAPI, PaddleOCR |
-| Schema SQL | `scratch/supabase_schema.sql` | Reference SQL for all tables including `patient_medications`, `patient_medication_audit`, `patient_trend_cache` | PostgreSQL |
+| Schema SQL | `scratch/supabase_schema.sql` | Reference SQL for all tables including `patient_medications`, `patient_medication_audit`, `patient_trends_cache` | PostgreSQL |
 
 ## Current vs Target Architecture
 

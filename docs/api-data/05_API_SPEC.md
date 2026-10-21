@@ -507,6 +507,20 @@ Doctor retrieves complete authorized medical dossier for an approved patient:
   - `observations`: Time-series vitals (blood pressure, glucose, HbA1c, etc.).
   - `longitudinalTrends`: Statistical trends and trajectory.
 
+#### `GET /api/doctor/patients/[patientId]/trends`
+Doctor retrieves complete longitudinal health trends, risk prediction, and executive clinical synthesis for an approved patient:
+- **Authorization**: Doctor session required (`requireDoctorSession`).
+- **Access Control Enforcement**: Queries `patient_access_requests` where `doctor_id = doctor.id AND patient_id = patient.id AND status = 'APPROVED'` and `expires_at > NOW()`. Returns `403 Forbidden` (`authorized: false`) if no active unexpired consent exists.
+- **Query Parameters**:
+  - `force=true` (optional): Bypasses cache and generates a fresh executive clinical synthesis with Google Gemini.
+  - `generate=true` (optional): Explicitly generates synthesis if not previously cached.
+
+#### `GET /api/patient/trends`
+Patient retrieves their own longitudinal biomarker trajectory and AI review:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Query Parameters**: `force=true`, `generate=true`.
+- **Eligibility Guard**: Requires $\ge 5$ distinct confirmed clinical encounter dates; otherwise returns `isEligible: false` with progress percentage and suppresses predictive conclusions.
+
 ---
 
 ### Patient Consent, Access Revocation & Profile Endpoints
@@ -544,3 +558,50 @@ Fetches full patient profile, personal demographics, chronic conditions, and aut
 Updates patient demographics, chronic conditions, or default auto-revoke preference:
 - **Authorization**: Patient session required (`requirePatientSession`).
 - **Two-Way Synchronization**: Automatically writes to both `patient_demographics` and `patient_onboarding` and updates `User.name`.
+
+---
+
+### Patient Allergies & Adverse Drug Reaction Endpoints
+
+#### `GET /api/patient/allergies`
+Patient fetches all active allergy records:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Query Filter**: Filters by `(patient_id = ANY($1::text[]) OR user_id = $2) AND (is_deleted IS NULL OR is_deleted = FALSE)`.
+- **Response**: `{ "success": true, "allergies": [...], "total": <n> }`.
+
+#### `POST /api/patient/allergies`
+Patient records a new allergy or hypersensitivity:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Input**:
+  ```json
+  {
+    "allergen": "Amoxicillin",
+    "category": "Medication",
+    "reaction": "Skin rash and facial swelling",
+    "severity": "Severe",
+    "status": "Patient Reported",
+    "addedDate": "2026-10-14",
+    "notes": "Experienced after 2 doses"
+  }
+  ```
+- **Response**: `{ "success": true, "allergy": { ... } }`.
+
+#### `PATCH /api/patient/allergies/[id]`
+Patient modifies an existing allergy record:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Access Check**: Verifies patient ownership (`user_id = user.id OR patient_id = ANY(patientIds)`).
+- **Input**: `{ "allergen": "...", "reaction": "...", "severity": "...", "notes": "..." }`.
+- **Response**: `{ "success": true, "allergy": { ... } }`.
+
+#### `DELETE /api/patient/allergies/[id]`
+Patient removes an allergy record via soft deletion:
+- **Authorization**: Patient session required (`requirePatientSession`).
+- **Access Check**: Verifies patient ownership before deletion.
+- **Behavior**: Sets `is_deleted = TRUE` preserving audit trail.
+- **Response**: `{ "success": true, "message": "Allergy record deleted successfully" }`.
+
+#### Automated Adverse Drug Reaction & Allergy Sync
+When a medication is marked `DISCONTINUED` via `PATCH /api/patient/medicines/[id]` with `isAllergy: true` or a reason indicating an allergic reaction (e.g. `reasonCategory = "ALLERGY"` or allergy text in discontinuation reason):
+- The endpoint automatically creates or updates an entry in `patient_allergies` with `allergen = medicine.name`, `category = 'Medication'`, `status = 'Clinician Discontinued'`, and `notes` documenting the discontinuation event.
+- Displays a `"Discontinued Medicine"` indicator badge in the patient overview allergies card.
+

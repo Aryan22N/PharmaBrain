@@ -1,8 +1,8 @@
 # KRISHNA.md — Vitals Analysis, Longitudinal Trends & Risk Prediction Plan
 
-> **Branch:** `feature/Krishna` (All work for this feature is strictly maintained on this branch; `main` branch will remain untouched).  
-> **Status:** Draft / Active Plan  
-> **Date:** 2026-10-10  
+> **Branch:** `main` (feature fully implemented and merged)  
+> **Status:** Complete & Implemented in Production  
+> **Date:** 2026-10-10 (Updated: 2026-10-21)  
 
 ---
 
@@ -12,9 +12,9 @@ The goal of this initiative is to leverage all physiological vital readings extr
 1. **Store & Align Chronologically**: Maintain a continuous longitudinal timeline of all vitals per patient across multiple prescription visits.
 2. **Compute Statistical Trends**: Track changes ($\Delta$), trajectory slope, moving averages, and fluctuation velocities between encounters.
 3. **Predict & Stratify Clinical Risks**: Evaluate vitals against deterministic, evidence-based clinical guidelines (AHA/ACC for Blood Pressure, ADA for Glycemia/HbA1c) rather than black-box ML models.
-4. **Render Interactive Graphical Plots**: Display time-series charts with color-coded safety/risk zones on the patient dashboard (`/patient/trends`).
-5. **Generate AI Patient Summaries**: Use Google Gemini to generate empathetic, plain-language summaries explaining trajectory patterns and actionable questions for their doctor.
-6. **Scope Boundary**: Focused strictly on the **Patient Portal** experience. The doctor dashboard view is reserved for future phases.
+4. **Render Interactive Graphical Plots**: Display time-series charts with color-coded safety/risk zones on both the patient dashboard (`/patient/trends`) and clinician dashboard (`/doctor/patients/[patientId]`).
+5. **Generate AI Patient & Clinician Summaries**: Use Google Gemini Executive Synthesis v2.0 to generate structured 3-paragraph clinical synopses (Physiological Baseline, Cardiovascular Trajectory, Clinical Action Plan) with deterministic rule-based fallback.
+6. **Unified Cross-Portal Scope**: Implemented across both **Patient Portal** and **Doctor Portal** (`LongitudinalTrendsDashboard.tsx`, `/api/doctor/patients/[patientId]/trends`).
 
 ---
 

@@ -425,6 +425,32 @@ Maintains detailed personal, emergency contact, chronic condition, and auto-revo
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Record creation timestamp |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Last update timestamp |
 
+---
+
+## Patient Allergies Table (Allergens & Adverse Reactions)
+
+Table: `patient_allergies` (snake_case, managed in PostgreSQL).  
+Tracks documented allergies, hypersensitivities, and medication-induced adverse drug reactions with soft-delete support.
+
+| Column | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `SERIAL PRIMARY KEY` | No | Unique allergy record ID |
+| `patient_id` | `VARCHAR(64)` | Yes | Patient identifier (`P-...`) |
+| `user_id` | `INTEGER` | Yes | Associated `User.id` |
+| `allergen` | `VARCHAR(255)` | No | Name of allergen or drug (e.g. Amoxicillin, Penicillin, Peanuts) |
+| `category` | `VARCHAR(100)` | Yes | Category (`Medication`, `Food`, `Environmental`, `Other`), default `'Medication'` |
+| `reaction` | `TEXT` | Yes | Clinical reaction description (e.g. skin rash, anaphylaxis, nausea) |
+| `severity` | `VARCHAR(50)` | Yes | Severity grade (`Mild`, `Moderate`, `Severe`), default `'Moderate'` |
+| `status` | `VARCHAR(100)` | Yes | Status (`Patient Reported`, `Clinician Discontinued`, `Active`), default `'Patient Reported'` |
+| `source` | `VARCHAR(100)` | Yes | Source of record (`Patient Portal`, `Prescription Discontinuation`), default `'Patient Portal'` |
+| `verification_status` | `VARCHAR(100)` | Yes | Verification badge (`Patient Reported`, `Clinician Verified`) |
+| `added_date` | `VARCHAR(100)` | Yes | Date documented (ISO or readable string) |
+| `notes` | `TEXT` | Yes | Additional clinical context or physician notes |
+| `is_deleted` | `BOOLEAN` | Yes | Soft-delete flag (default `FALSE`), preserves audit integrity |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Timestamp of creation (default `CURRENT_TIMESTAMP`) |
+
+---
+
 ## PLANNED — Future Tables
 
 | Table | Purpose | Status |

@@ -42,14 +42,15 @@ The **Trend Analysis Engine** (`/patient/trends`) is a dual-tier longitudinal he
 | **Metric Data Sufficiency Gating** | `Implemented` | `frontend/lib/trends.ts` (`hasSufficientData`, `insufficientDataReason`) |
 | **Multi-Tier SHA-256 Cache (RAM + DB)** | `Implemented` | `frontend/app/api/patient/trends/route.ts` (`memoryCache` + `patient_trends_cache`) |
 | **Stale Summary Flagging on Data Change** | `Implemented` | `frontend/app/api/patient/trends/route.ts` (`isStale: true`, `staleReason`) |
-| **On-Demand Gemini Invocation** | `Implemented` | `frontend/app/api/patient/trends/route.ts` (`?generate=true`, `?force=true`) |
-| **Structured AI Response Validation** | `Implemented` | `frontend/app/api/patient/trends/route.ts` (`validateGeminiResponse`) |
-| **Candidate Model Fallback** | `Implemented` | `frontend/app/api/patient/trends/route.ts` (`gemini-flash-latest`, `gemini-2.5-flash-lite`, `gemini-pro-latest`) |
-| **Frontend 8-State Lifecycle** | `Implemented` | `frontend/app/patient/trends/page.tsx` |
-| **Prescription Traceability Modal** | `Implemented` | `frontend/app/patient/trends/page.tsx` (`handleSelectDataPoint`, `rxModalDoc`) |
+| **On-Demand & Auto Gemini Invocation** | `Implemented` | `frontend/lib/trendsService.ts` (`?generate=true`, `?force=true`, and auto-generation on missing cache) |
+| **Structured AI Response Validation** | `Implemented` | `frontend/lib/trendsService.ts` (`validateGeminiResponse`) |
+| **Candidate Model Fallback** | `Implemented` | `frontend/lib/trendsService.ts` (`gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-flash-latest`) |
+| **Frontend 8-State Lifecycle** | `Implemented` | `frontend/components/trends/LongitudinalTrendsDashboard.tsx` |
+| **Prescription Traceability Modal** | `Implemented` | `frontend/components/trends/LongitudinalTrendsDashboard.tsx` (`handleSelectDataPoint`, `rxModalDoc`) |
 | **Automated Test Suite (37 tests)** | `Implemented` | `scratch/test_trend_eligibility.js` (37 passed, 0 failed) |
 | **BMI Trajectory (Height Extraction)** | `Partially Implemented` | Weight is tracked; patient height is not yet extracted from prescription OCR |
-| **Doctor Portal Trend View** | `Planned` | Scoped for future phase per `KRISHNA.md` line 17 |
+| **Doctor Portal Trend View** | `Implemented` | `frontend/app/doctor/patients/[patientId]/page.tsx` (`#biomarkers`) via `/api/doctor/patients/[patientId]/trends` with verified consent checking |
+| **Executive Clinical AI Synthesis v2.0** | `Implemented` | `frontend/lib/trendsService.ts` (`PROMPT_VERSION = "v2.0"`) with 3-paragraph clinical synopsis and deterministic fallback |
 | **Automated Background Cache Worker** | `Planned` | Invalidation is currently evaluated on-demand at query time |
 
 ---

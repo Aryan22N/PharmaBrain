@@ -43,7 +43,9 @@ Features present in the application and service include:
 - Draft extraction review, correction, confirmation, and discard flows.
 - Medicine matching against the `medicine_master` data, with uncertain matches available for human review.
 - Patient medical timeline, prescription-image inspection, and record views.
-- Vitals and trend-related endpoints and views.
+- Longitudinal Health Trends & Risk Prediction Engine: Multi-encounter biomarker trajectory evaluation, strict 5-clinical-date eligibility gating, AHA/ACC 2017 & ADA 2024 guideline staging, dual-tier SHA-256 fingerprint caching, and executive AI clinical synthesis v2.0 with deterministic fallback.
+- Doctor Longitudinal Dashboard & Consent Security: Clinician-facing longitudinal biomarker suite at `/doctor/patients/[patientId]`, protected by verified patient consent checks (`patient_access_requests`).
+- Rapid Diagnostic Snapshot: Clickable clinical cards for active conditions, allergen hypersensitivities, and current medications opening comprehensive pharmacology, mechanisms, and clinical precaution modals.
 - Supabase Storage integration for prescription images.
 - Python API authentication using an `X-API-Key` token for protected endpoints.
 

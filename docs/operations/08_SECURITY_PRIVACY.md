@@ -115,7 +115,7 @@ Owner: TBD
     SET status = 'REVOKED', revoked_at = NOW()
     WHERE status = 'APPROVED' AND expires_at IS NOT NULL AND expires_at <= NOW();
     ```
-  - `GET /api/doctor/patients/[patientId]/records` validates that an approved authorization row exists, that `revoked_at IS NULL`, and that `(expires_at IS NULL OR expires_at > NOW())`. If the permission has expired, the doctor is immediately returned `HTTP 403 Forbidden` (`"Access expired or revoked by patient."`).
+  - `GET /api/doctor/patients/[patientId]/records` and `GET /api/doctor/patients/[patientId]/trends` validate that an approved authorization row exists, that `revoked_at IS NULL`, and that `(expires_at IS NULL OR expires_at > NOW())`. If the permission has expired or was revoked, the doctor is immediately returned `HTTP 403 Forbidden` (`"Access expired or revoked by patient."` / `{ authorized: false }`).
 - **Dynamic In-Flight Extension & Instant Revocation**:
   - Patients can dynamically alter the active duration window via `PATCH /api/patient/access-requests/[id]/duration` without needing the doctor to re-request access.
   - Patients can invoke instant, zero-delay revocation via `POST /api/patient/access-requests/[id]/revoke` at any time.

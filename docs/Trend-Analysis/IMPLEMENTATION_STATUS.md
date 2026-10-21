@@ -153,30 +153,72 @@ This tracker provides an evidence-based audit of all features in the **Trend Ana
 
 ---
 
-## 4. Planned Features
-
-### 4.1 Doctor Portal Trend View
-- **Feature Name:** Clinician Dashboard Longitudinal Review
-- **Current Status:** `Planned`
+### 2.7 Doctor Portal Longitudinal Trends Integration
+- **Feature Name:** Clinician Dashboard Longitudinal Review & Access Verification
+- **Current Status:** `Implemented`
 - **Evidence / Source Files:**
-  - `KRISHNA.md` (line 17: *"The doctor dashboard view is reserved for future phases"*)
-- **Completed Work:** None.
-- **Remaining Work:**
-  - Design clinician-facing trends tab on `/doctor/patients/[id]/trends`.
-  - Display clinical trajectory velocity metrics alongside prescription adjustment notes.
-- **Blockers / Dependencies:** Dependent on Doctor Portal navigation and authorization modules.
-- **Test Status:** Planned.
-- **Next Recommended Action:** Plan implementation following Doctor Portal user story approvals.
+  - `frontend/app/doctor/patients/[patientId]/page.tsx` (lines 33, 40–65, 1140–1180: `<LongitudinalTrendsDashboard isDoctorView={true} ... />`)
+  - `frontend/app/api/doctor/patients/[patientId]/trends/route.ts` (`requireDoctorSession`, `patient_access_requests` consent check)
+  - `frontend/components/trends/LongitudinalTrendsDashboard.tsx`
+  - `frontend/lib/trendsService.ts`
+- **Completed Work:**
+  - Embedded the full Longitudinal Health Trends & Risk Prediction suite directly into the doctor dashboard at `/doctor/patients/[patientId]` under `#biomarkers`.
+  - Backend enforces strict doctor authentication and active patient consent (`status = 'APPROVED'` and unexpired in `patient_access_requests`).
+  - Supports `?force=true` and `?generate=true` query parameters.
+  - Full parity with patient view: eligibility progress bar, interactive SVG trajectory charts with reference bands, metric tabs, chronological encounter log, and direct prescription scan preview modal.
+- **Remaining Work:** None.
+- **Blockers / Dependencies:** None.
+- **Test Status:** Verified (HTTP 200 on doctor patient view with full trends rendered).
 
 ---
 
-### 4.2 Automated Background Cache Invalidation Worker
+### 2.8 Executive Clinical AI Synthesis (Prompt v2.0)
+- **Feature Name:** Dual-Utility Professional Clinical Synthesis
+- **Current Status:** `Implemented`
+- **Evidence / Source Files:**
+  - `frontend/lib/trendsService.ts` (`PROMPT_VERSION = "v2.0"`, `generateGeminiPatientSummary`, `generateDeterministicFallbackSummary`)
+  - `frontend/components/trends/LongitudinalTrendsDashboard.tsx`
+- **Completed Work:**
+  - Replaced chatty/conversational tone with an objective, clinical-grade 3-paragraph executive synopsis:
+    1. Physiological Baseline & Stability (SpO2, resting pulse, regular rhythm, absence of acute volatility).
+    2. Cardiovascular Classification & Glycemic Trajectory (arterial BP delta vs baseline, formal 2017 AHA/ACC Stage 1 HTN classification, ADA 2024 glycemic markers, risk tier).
+    3. Clinical Action Plan & Collaborative Focus (guideline-directed non-pharmacological interventions like DASH/sodium restriction <2,300 mg/day, structured HBPM home blood pressure logs, baseline lipid/metabolic panels).
+  - Key Clinical Trajectory Markers with exact metrics.
+  - Actionable Clinical Consultation Questions for physician visits.
+  - Automatic deterministic fallback alignment ensuring 100% availability.
+- **Remaining Work:** None.
+- **Blockers / Dependencies:** None.
+- **Test Status:** Verified in production build.
+
+---
+
+## 3. Partially Implemented Features
+
+### 3.1 Body Mass Index (BMI) Velocity Tracking
+- **Feature Name:** Weight & BMI Trajectory
+- **Current Status:** `Partially Implemented`
+- **Evidence / Source Files:**
+  - `frontend/lib/trends.ts` (Weight tracking in kg)
+  - `model/final_prescription_ocr_service_windows.py` (Vitals parsing)
+- **Completed Work:**
+  - Body weight is captured in kilograms, normalized in `observations` table, and displayed with pairwise deltas and trajectory direction.
+- **Remaining Work:**
+  - BMI calculation requires patient height ($BMI = \text{weight} / \text{height}^2$). Patient height is currently neither extracted from OCR slips nor prompted in the onboarding profile.
+- **Blockers / Dependencies:** Height input missing from user profile / OCR schema.
+- **Test Status:** Weight delta verified; BMI computation unverified due to missing height parameter.
+- **Next Recommended Action:** Add optional height field to patient profile (`User.heightCm`) to enable automatic BMI derivation from weight readings.
+
+---
+
+## 4. Planned Features
+
+### 4.1 Automated Background Cache Invalidation Worker
 - **Feature Name:** Proactive Cache Invalidation on Prescription Confirmation
 - **Current Status:** `Planned`
 - **Evidence / Source Files:**
   - `frontend/app/api/confirm/[id]/route.ts`
 - **Completed Work:**
-  - Fingerprint mismatch detection currently happens on-demand when the patient navigates to `/patient/trends`.
+  - Fingerprint mismatch detection currently happens on-demand when the patient or doctor navigates to trends.
 - **Remaining Work:**
   - Add explicit DB trigger or Next.js background webhook inside `/api/confirm/[id]` to mark cache stale immediately upon prescription confirmation.
 - **Blockers / Dependencies:** None.
@@ -190,21 +232,22 @@ This tracker provides an evidence-based audit of all features in the **Trend Ana
 | ID | Feature Description | Status | Evidence File | Tests Executed | Blocker / Dependency |
 |---|---|---|---|---|---|
 | F-01 | JWT Patient Authorization | `Implemented` | `api/patient/trends/route.ts` | Test 1: 401 Rejection (PASS) | None |
-| F-02 | 5-Clinical-Date Minimum Eligibility | `Implemented` | `api/patient/trends/route.ts` | Test 2: Ineligible State (PASS) | None |
-| F-03 | Unconfirmed Prescription Exclusion | `Implemented` | `api/patient/trends/route.ts` | Test 3: Unconfirmed Excluded (PASS) | None |
-| F-04 | Mirror Prescription Deduplication | `Implemented` | `api/patient/trends/route.ts` | Test 3: Mirrors Unified (PASS) | None |
-| F-05 | Same-Date Clinical Grouping | `Implemented` | `api/patient/trends/route.ts` | Test 3: Same Date Unified (PASS) | None |
+| F-02 | 5-Clinical-Date Minimum Eligibility | `Implemented` | `lib/trendsService.ts` | Test 2: Ineligible State (PASS) | None |
+| F-03 | Unconfirmed Prescription Exclusion | `Implemented` | `lib/trendsService.ts` | Test 3: Unconfirmed Excluded (PASS) | None |
+| F-04 | Mirror Prescription Deduplication | `Implemented` | `lib/trendsService.ts` | Test 3: Mirrors Unified (PASS) | None |
+| F-05 | Same-Date Clinical Grouping | `Implemented` | `lib/trendsService.ts` | Test 3: Same Date Unified (PASS) | None |
 | F-06 | AHA/ACC 2017 BP Staging | `Implemented` | `lib/trends.ts` | Test 4: BP Staging (PASS) | None |
 | F-07 | ADA 2024 Glycemia Staging | `Implemented` | `lib/trends.ts` | Test 4: Glycemia Staging (PASS) | None |
 | F-08 | Sustained Systolic BP Rise Warning | `Implemented` | `lib/trends.ts` | Test 4: Sustained Rise (PASS) | None |
 | F-09 | Metric-Specific Sufficiency Check | `Implemented` | `lib/trends.ts` | Test 4: Sufficiency Gating (PASS) | None |
-| F-10 | SHA-256 Fingerprint Caching | `Implemented` | `api/patient/trends/route.ts` | Test 5C: Cache Reuse (PASS) | None |
-| F-11 | Stale Cache Invalidation Flag | `Implemented` | `api/patient/trends/route.ts` | Test 5D: Stale Summary (PASS) | None |
-| F-12 | On-Demand Gemini Invocation | `Implemented` | `api/patient/trends/route.ts` | Test 5B: User Generation (PASS) | None |
-| F-13 | Gemini Candidate Model Fallback | `Implemented` | `api/patient/trends/route.ts` | Test 5B: Candidate Selection (PASS) | None |
-| F-14 | Response Validation & Error Guard | `Implemented` | `api/patient/trends/route.ts` | Test 5B/5E: Schema Guard (PASS) | None |
-| F-15 | UI State Machine (States 1–8) | `Implemented` | `trends/page.tsx` | UI Build & Test 2/4/5 (PASS) | None |
-| F-16 | Prescription Scan Traceability | `Implemented` | `trends/page.tsx` | UI Modal Code Verified | None |
+| F-10 | SHA-256 Fingerprint Caching | `Implemented` | `lib/trendsService.ts` | Test 5C: Cache Reuse (PASS) | None |
+| F-11 | Stale Cache Invalidation Flag | `Implemented` | `lib/trendsService.ts` | Test 5D: Stale Summary (PASS) | None |
+| F-12 | Auto/On-Demand Gemini Invocation | `Implemented` | `lib/trendsService.ts` | Test 5B: User Generation (PASS) | None |
+| F-13 | Gemini Candidate Model Fallback | `Implemented` | `lib/trendsService.ts` | Test 5B: Candidate Selection (PASS) | None |
+| F-14 | Response Validation & Error Guard | `Implemented` | `lib/trendsService.ts` | Test 5B/5E: Schema Guard (PASS) | None |
+| F-15 | UI State Machine (States 1–8) | `Implemented` | `LongitudinalTrendsDashboard.tsx` | UI Build & Test 2/4/5 (PASS) | None |
+| F-16 | Prescription Scan Traceability | `Implemented` | `LongitudinalTrendsDashboard.tsx` | UI Modal Code Verified | None |
 | F-17 | Weight Tracking | `Implemented` | `lib/trends.ts` | Test 4: Weight (PASS) | None |
 | F-18 | BMI Derivation | `Partially Implemented`| `lib/trends.ts` | Unverified (Missing height) | Height input |
-| F-19 | Doctor Portal Trends View | `Planned` | `KRISHNA.md` | Not run | Doctor Portal |
+| F-19 | Doctor Portal Trends View | `Implemented` | `doctor/patients/[patientId]/page.tsx` | Doctor View Verified (PASS) | None |
+| F-20 | Executive AI Synthesis v2.0 | `Implemented` | `lib/trendsService.ts` | Executive Format Verified (PASS) | None |
