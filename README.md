@@ -1,293 +1,341 @@
-# Single-Hospital-Pro
+<div align="center">
 
-**A clinician-reviewed workflow for turning prescription images into structured medical records.**
+<img src="https://github.com/user-attachments/assets/ac75b89d-c9b4-4393-81e9-31bddba22817" alt="PharmaBrain — from a crumpled prescription photo to a clinician-verified health record" width="100%"/>
 
-Single-Hospital-Pro combines a Next.js patient and clinician interface with a Python OCR and extraction service. It helps digitize prescription information and organize it alongside patient history. Extracted information is a draft and requires clinician review before clinical use.
+<br/>
 
-[Architecture](docs/architecture/02_ARCHITECTURE.md) · [Pipeline](docs/pipeline/03_PIPELINE_SPEC.md) · [API specification](docs/api-data/05_API_SPEC.md) · [Security and privacy](docs/operations/08_SECURITY_PRIVACY.md) · [Known issues](docs/operations/13_KNOWN_ISSUES.md)
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![React](https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+<br/>
+[![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.11-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![PaddleOCR](https://img.shields.io/badge/PaddleOCR-2.8-0053D6?style=for-the-badge&logo=paddlepaddle&logoColor=white)](https://github.com/PaddlePaddle/PaddleOCR)
+[![Gemini](https://img.shields.io/badge/Google_Gemini-AI-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)](https://ai.google.dev)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres_+_Storage-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 
-## Contents
+**[Why](#-why-pharmabrain)** ·
+**[Features](#-features)** ·
+**[How it works](#-how-it-works)** ·
+**[Quick start](#-quick-start)** ·
+**[Docs](#-documentation)** ·
+**[Roadmap](#-roadmap)**
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Technology stack](#technology-stack)
-- [Repository layout](#repository-layout)
-- [Prerequisites](#prerequisites)
-- [Configuration](#configuration)
-- [Run with Docker Compose](#run-with-docker-compose)
-- [Run locally](#run-locally)
-- [URLs and API](#urls-and-api)
-- [Database and uploaded files](#database-and-uploaded-files)
-- [Prescription processing](#prescription-processing)
-- [Development commands](#development-commands)
-- [Security and privacy](#security-and-privacy)
-- [Troubleshooting](#troubleshooting)
-- [Limitations and roadmap](#limitations-and-roadmap)
-- [Contributing](#contributing)
-- [License](#license)
+</div>
 
-## Overview
+<br/>
 
-The application supports patients and clinicians with prescription digitization and medical-record workflows. A patient or clinician can upload a prescription image; the OCR service extracts text and uses Gemini to produce structured draft data. A reviewer can inspect and correct the extraction before it is confirmed into the record. The web application also provides patient records, a medical timeline, and trend-related views.
+> [!WARNING]
+> **PharmaBrain produces drafts, not clinical decisions.** OCR and AI can misread or omit information. Every extraction stays in `PENDING_USER_CONFIRMATION` until a human reviews it, and there is no auto-confirm path. The project makes no claim of clinical validation, accuracy, regulatory compliance or production readiness. Use synthetic data unless your environment is approved for real patient data.
 
-This repository configures a locally run web application and OCR service. Docker Compose exposes both services on the local machine. The repository does not establish that a deployment is production-ready or compliant with a healthcare regulation.
+---
 
-## Features
+## 💡 Why PharmaBrain
 
-Features present in the application and service include:
+Prescriptions are still mostly paper. Each one is a snapshot, so a patient's history ends up scattered across clinics, folders and phone galleries. Slow trends go unnoticed, and a new prescription can quietly overwrite a long-term treatment.
 
-- Patient and doctor registration and login routes, with role-specific workflows.
-- Prescription image upload and OCR using PaddleOCR.
-- Gemini-assisted structuring of OCR output into prescription fields.
-- Draft extraction review, correction, confirmation, and discard flows.
-- Medicine matching against the `medicine_master` data, with uncertain matches available for human review.
-- Patient medical timeline, prescription-image inspection, and record views.
-- Longitudinal Health Trends & Risk Prediction Engine: Multi-encounter biomarker trajectory evaluation, strict 5-clinical-date eligibility gating, AHA/ACC 2017 & ADA 2024 guideline staging, dual-tier SHA-256 fingerprint caching, and executive AI clinical synthesis v2.0 with deterministic fallback.
-- Doctor Longitudinal Dashboard & Consent Security: Clinician-facing longitudinal biomarker suite at `/doctor/patients/[patientId]`, protected by verified patient consent checks (`patient_access_requests`).
-- Rapid Diagnostic Snapshot: Clickable clinical cards for active conditions, allergen hypersensitivities, and current medications opening comprehensive pharmacology, mechanisms, and clinical precaution modals.
-- Supabase Storage integration for prescription images.
-- Python API authentication using an `X-API-Key` token for protected endpoints.
+PharmaBrain turns those snapshots into a **continuous, patient-owned medical record**:
 
-These features are not a claim of clinical validation, accuracy, regulatory compliance, or production readiness. The project roadmap describes additional work, including PDF and multi-page support, GPU acceleration, a broader medicine database, and hybrid medicine matching.
+| 😵 Without it | 🧠 With PharmaBrain |
+|---|---|
+| Handwritten slips, lost in a drawer | Photo in, structured draft out in seconds |
+| One-off readings, no context | Longitudinal vitals with guideline-based reference bands |
+| Every Rx looks like an isolated list | A medication lifecycle that never silently cancels unrelated treatments |
+| Records shared as photos on WhatsApp | Doctor access that is patient-approved, time-boxed and revocable |
+| "Trust the AI" | **Human in the loop.** The LLM structures text and never invents drug facts |
 
-## Architecture
+---
+
+##  Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+###  Prescription Intelligence
+- Upload a photo and get **PaddleOCR** text with confidence scores
+- **Gemini** structures it into typed prescription fields
+- Every field carries `src` line IDs, so each value is **traceable to the exact OCR line**
+- Duplicate uploads are caught by SHA-256 and resume from saved OCR
+- Review, edit, **confirm or discard** drafts in a dedicated review screen
+
+</td>
+<td width="50%" valign="top">
+
+###  Medication Lifecycle Engine
+- Reconciles medicines **across prescriptions and doctors**
+- Classifies each change: `NEW_COURSE`, `POSSIBLE_CONTINUATION`, `CHANGE_IN_STRENGTH_OR_INSTRUCTIONS`, `CONFLICTING_INSTRUCTIONS`, `OVERLAPPING_TREATMENT`, `POTENTIAL_DUPLICATE`, `INSUFFICIENT_INFORMATION`
+- Parses durations into expected end dates
+- Patient controls with reasons and a full **audit trail**
+- Inspect the original prescription scan beside each medicine
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+###  Longitudinal Trend Analysis
+- Deterministic staging against **AHA/ACC 2017** (blood pressure) and **ADA 2024** (glycemic) guidelines
+- Pairwise deltas, monthly velocity and sustained-rise warnings
+- **5-visit gate** (5 confirmed prescriptions on 5 distinct dates) before multi-visit AI synthesis
+- Gemini writes a plain-language, non-diagnostic summary plus questions for your next visit
+- SHA-256 caching, so Gemini is only called on request
+
+</td>
+<td width="50%" valign="top">
+
+###  Consent-Based Doctor Sharing
+- Separate **patient** and **doctor** roles and portals
+- Doctors look up patients by ID and request access
+- Patients approve with an **auto-revoke window of 3, 8 or 30 days**
+- Expired or revoked access is blocked server-side with `403`
+- Patient timeline, onboarding and demographics stay in sync
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>🧩 More under the hood</b></summary>
+
+<br/>
+
+- **Medicine matching** against `medicine_master` with RapidFuzz. Near-matches are flagged for review and **never auto-accepted**.
+- **PII masking** of emails and phone numbers before the prompt reaches Gemini.
+- **Resilient Gemini calls** with model-candidate fallback and bounded retries. A failed structuring attempt can be resumed.
+- **Patient timeline** with idempotent confirmation, draft callouts and "Review & Submit" or "Discard Draft" actions.
+- **Supabase Storage** for prescription images, with a disk fallback.
+- **Python API auth** via `X-API-Key`. **JWT** auth with `bcrypt` password hashing on the web side.
+- A per-event **audit log** in the OCR pipeline.
+
+</details>
+
+---
+
+## 🔬 How it works
+
+<img src="https://github.com/user-attachments/assets/95a1d900-26e3-4e4f-9104-f115f78f5922" alt="Pipeline: Upload, OCR, Structure, Validate, Human review, Living record" width="100%"/>
+
+<br/>
 
 ```mermaid
 flowchart LR
-    Browser[Patient or clinician browser] --> Web[Next.js web app and API routes]
-    Web -->|HTTP and X-API-Key| OCR[FastAPI OCR service]
-    OCR --> Paddle[PaddleOCR]
-    OCR --> Gemini[Google Gemini API]
-    OCR -->|SQLAlchemy| DB[(PostgreSQL or configured backend database)]
-    Web -->|SQL queries| DB
-    Web -->|Supabase client| Storage[Supabase Storage]
+    U(["🧑‍⚕️ Patient / Clinician"]) --> W["<b>Next.js 16</b><br/>UI + API routes"]
+    W -- "HTTP + X-API-Key" --> O["<b>FastAPI</b><br/>OCR service"]
+    O --> P["PaddleOCR"]
+    O --> G["Google Gemini"]
+    O -- SQLAlchemy --> D[("PostgreSQL<br/>Supabase")]
+    W -- "pg pool" --> D
+    W -- "Supabase client" --> S[("Storage<br/>prescription images")]
+
+    classDef core fill:#0d2433,stroke:#5eead4,color:#f1f5f9;
+    classDef ext fill:#12303a,stroke:#38bdf8,color:#f1f5f9;
+    class W,O core
+    class P,G,D,S ext
 ```
 
-The frontend handles the web experience and server-side API routes. The Python service runs OCR, Gemini structuring, validation, and related database operations. Both services use `DATABASE_URL`; for a full web application, configure it to the same PostgreSQL database. Uploaded images use the configured Supabase Storage bucket. Docker Compose also mounts a named volume for the Python service's local SQLite fallback, but SQLite does not satisfy the frontend's database requirement.
+### Design principles
 
-## Technology stack
+| Principle | How it is enforced |
+|---|---|
+| 🧑‍⚕️ **Human in the loop** | Every extraction starts as `PENDING_USER_CONFIRMATION`. No auto-confirm path exists. |
+| 📚 **LLM is not a source of truth** | Drug facts come only from `medicine_master`. The LLM structures text and never generates drug data. |
+| 🔎 **Traceability** | Every extracted field carries OCR line IDs, and the `audit_log` records every pipeline event. |
+| 🛡️ **PII before LLM** | `mask_pii()` strips emails and phones before the prompt is sent. |
+| ⚠️ **Safe corrections** | Auto-corrected fields are flagged `check`. Near-match drugs are never auto-accepted. |
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| Web | Next.js 16, React 19, TypeScript | Patient and clinician UI and server-side routes |
-| Styling | Tailwind CSS 4 | Frontend styling |
-| Backend | Python 3.11, FastAPI | OCR and prescription processing API |
-| Database access | SQLAlchemy Core 2.x; `pg` in the frontend | SQL access from Python and Node.js |
-| Database | PostgreSQL; SQLite is supported by the Python service | Patient, extraction, and related records |
-| OCR | PaddleOCR 2.8 | Text extraction from prescription images |
-| AI | Google Gemini via `google-genai` | Structured extraction and selected summaries |
-| Medicine matching | RapidFuzz | Fuzzy candidate matching for review |
-| Image storage | Supabase Storage | Prescription image storage integration |
-| Containers | Docker and Docker Compose | Local multi-service setup |
+> [!NOTE]
+> Patient names, diagnoses and medicine data **are sent to the Google Gemini API** as part of structuring. Review [Security & Privacy](docs/operations/08_SECURITY_PRIVACY.md) before using any real data.
 
-Versions are taken from the package manifests and Python requirements. The project does not specify a hosted deployment provider.
+---
 
-## Repository layout
+##  Tech stack
 
-```text
-.
-├── docs/                         # Architecture, API, pipeline, operations, and domain docs
-├── frontend/                     # Next.js application, API routes, and Dockerfile
-├── model/                        # FastAPI OCR service, requirements, and Dockerfile
-├── scratch/                      # Local scripts and SQL; most scratch files are git-ignored
-├── docker-compose.yml            # Local frontend and Python service orchestration
-├── .env.example                  # Environment variable template
-├── CHANGELOG.md                  # Project change history
-└── README.md
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Lucide icons |
+| **Web API** | Next.js route handlers, `jsonwebtoken`, `bcryptjs`, `pg` |
+| **Backend** | Python 3.11, FastAPI, Uvicorn, Pydantic 2 |
+| **OCR** | PaddleOCR 2.8 on PaddlePaddle 2.6 (CPU by default) |
+| **AI** | Google Gemini through the `google-genai` SDK |
+| **Matching** | RapidFuzz |
+| **Data** | PostgreSQL (Supabase), SQLAlchemy Core 2.x, SQLite fallback for the Python service only |
+| **Storage** | Supabase Storage |
+| **Infra** | Docker and Docker Compose |
+
+---
+
+## 🚀 Quick start
+
+### Prerequisites
+
+- Docker with the Compose plugin
+- A **PostgreSQL** database reachable by both services (a Supabase project works well)
+- A **Google Gemini API key**
+- A **Supabase** project (URL, keys and a storage bucket) for prescription images
+
+### 1 · Clone and configure
+
+```bash
+git clone https://github.com/<your-username>/PharmaBrain.git
+cd PharmaBrain
+cp .env.example .env
 ```
 
-`app.py` is a minimal standalone OCR server; the main backend is `model/final_prescription_ocr_service_windows.py`.
-
-## Prerequisites
-
-For the Docker Compose workflow:
-
-- Docker Engine or Docker Desktop with the Compose plugin.
-- A PostgreSQL database reachable by both containers (for example, a configured Supabase PostgreSQL database).
-- A Google Gemini API key.
-- A Supabase project and storage credentials for prescription image storage.
-
-For local development, install Python 3.11+, Node.js 22 (the frontend Docker image uses Node 22), and npm. The Python service downloads/initializes PaddleOCR models on first startup and may take several minutes.
-
-## Configuration
-
-Copy `.env.example` to `.env` and replace its placeholders. Never commit `.env` or real credentials. The template's SQLite URL is only suitable for the Python service; use PostgreSQL for the complete frontend and backend application.
+Edit `.env` and set at least:
 
 ```dotenv
-GEMINI_API_KEY=replace_with_gemini_api_key
+GEMINI_API_KEY=...
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
-API_TOKEN=replace_with_a_long_random_token
-PYTHON_API_TOKEN=replace_with_the_same_token
-JWT_SECRET=replace_with_a_long_random_secret
-FRONTEND_ORIGIN=http://localhost:3000
-PYTHON_API_URL=http://python-ocr:8000
-NEXT_PUBLIC_SUPABASE_URL=https://PROJECT_REF.supabase.co
-SUPABASE_URL=https://PROJECT_REF.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=replace_with_supabase_anon_key
-SUPABASE_ANON_KEY=replace_with_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=replace_with_supabase_service_role_key
-SUPABASE_STORAGE_BUCKET=OCR_Images
-SUPABASE_STORAGE_FOLDER=uploads
+JWT_SECRET=<long random string>
+API_TOKEN=<long random token>
+PYTHON_API_TOKEN=<same value as API_TOKEN>
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...      # server-side only, never expose to the browser
 ```
 
-| Variable | Required | Used by | Purpose / default |
-|---|---|---|---|
-| `GEMINI_API_KEY` | Yes | Python service and selected frontend routes | Gemini authentication. Set a valid key. |
-| `DATABASE_URL` | Yes | Both services | Shared PostgreSQL connection string for the full application. Compose's backend-only SQLite fallback is `sqlite:////app/data/rx_local.db`; it does not serve the frontend. |
-| `API_TOKEN` | Yes for protected backend API use | Python service | Backend `X-API-Key` token; auto-generated if unset when started directly, but configure a stable secret. |
-| `PYTHON_API_TOKEN` | Yes for frontend-to-backend calls | Frontend | Must match `API_TOKEN`. Compose currently supplies an insecure development fallback when unset; replace it. |
-| `JWT_SECRET` | Yes for secure authentication | Frontend | JWT signing and verification. Source contains an insecure fallback; configure a strong secret. |
-| `PYTHON_API_URL` | No | Frontend | Python API base URL; Compose sets the internal URL. Direct local development uses `http://127.0.0.1:8000` by default. |
-| `FRONTEND_ORIGIN` | No | Python service | CORS origin; defaults to `*` in the service. Compose sets `http://localhost:3000`. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Required for storage integration | Frontend | Supabase project URL; the `NEXT_PUBLIC_` prefix means it is exposed to browser code. |
-| `SUPABASE_URL` | Required for storage integration | Frontend | Server-side Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Required for the configured Supabase client | Frontend | Public/anonymous Supabase key; exposed to browser code and must rely on Supabase policies for access control. |
-| `SUPABASE_ANON_KEY` | Required when no service-role key is configured | Frontend | Server-side fallback key for Supabase Storage. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Optional in code; required for service-role storage access | Frontend | Secret server-side Supabase key. Never expose it to browser code. |
-| `SUPABASE_STORAGE_BUCKET` | No | Frontend | Storage bucket; defaults to `OCR_Images`. |
-| `SUPABASE_STORAGE_FOLDER` | No | Frontend | Storage folder; defaults to `uploads`. |
-| `PADDLEOCR_DEVICE` | No | Python service | OCR device; defaults to CPU. |
-| `PADDLEOCR_LANG` | No | Python service | PaddleOCR language; defaults to English. |
-| `HOST`, `PORT` | No | Python service | Bind address and port; default to `0.0.0.0:8000`. |
+> [!IMPORTANT]
+> The `.env.example` SQLite URL only covers the Python service. **Use PostgreSQL for the full app**, because the frontend queries it directly. Replace every placeholder with strong values, and never commit `.env`.
 
-The application also contains a default Supabase project URL in source code. Set your own project URL and keys rather than relying on that default. Compose currently sets `NODE_TLS_REJECT_UNAUTHORIZED=0` for the frontend, which disables TLS certificate validation in that process; review and correct this configuration before any deployment that handles sensitive data.
+### 2 · Launch
 
-## Run with Docker Compose
+```bash
+docker compose up --build
+```
 
-1. Clone the repository and enter its directory.
-2. Create the environment file and configure the required values:
+The first backend start downloads and initialises the PaddleOCR models, which can take **several minutes**. Compose waits for the backend health check before starting the frontend.
 
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+### 3 · Open
 
-   Set `DATABASE_URL` to a PostgreSQL URL. Set a Gemini key, Supabase project URL and keys, a strong `JWT_SECRET`, and matching strong values for `API_TOKEN` and `PYTHON_API_TOKEN`.
+| Service | URL |
+|---|---|
+| 🌐 Web app | http://localhost:3000 |
+| ⚙️ OCR API | http://localhost:8000 |
+| 📖 Interactive API docs | http://localhost:8000/docs |
+| 💓 Health check | http://localhost:8000/health |
 
-3. Build and start the services:
+### Run without Docker
 
-   ```powershell
-   docker compose up --build
-   ```
-
-4. Check status and logs in another terminal:
-
-   ```powershell
-   docker compose ps
-   docker compose logs -f
-   ```
-
-5. Open [http://localhost:3000](http://localhost:3000). The Python service health endpoint is [http://localhost:8000/health](http://localhost:8000/health).
-6. Stop the services with `Ctrl+C`, or run `docker compose down` in another terminal. `docker compose down` leaves named volumes in place; removing volumes deletes persisted local container data.
-7. Rebuild after application or Docker configuration changes with `docker compose up --build`.
-
-The first backend startup may take several minutes while OCR model files are initialized. Compose waits for the backend health check before starting the frontend.
-
-## Run locally
-
-The local workflow requires both services and a PostgreSQL database usable by the frontend. Configure environment variables for both processes; `.env` files are ignored by Git. Configure the Python service with `GEMINI_API_KEY`, `DATABASE_URL`, and `API_TOKEN`; configure the frontend with the same `DATABASE_URL`, `PYTHON_API_URL=http://localhost:8000`, `PYTHON_API_TOKEN` matching the backend token, `JWT_SECRET`, and the Supabase variables required for image storage.
-
-In one terminal, install Python dependencies and start the API:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r model/requirements.txt
+```bash
+# Terminal 1: OCR service
+python -m venv .venv && source .venv/bin/activate     # Windows: .\.venv\Scripts\Activate.ps1
+pip install -r model/requirements.txt
 python model/final_prescription_ocr_service_windows.py
-```
 
-In a second terminal:
-
-```powershell
+# Terminal 2: web app
 cd frontend
 npm ci
 npm run dev
 ```
 
-The service reads environment variables at startup; create `model/.env` and `frontend/.env.local` or otherwise provide the variables to each process. See [`.env.example`](.env.example) and the [runbook](docs/operations/09_RUNBOOK.md) for variable details. The runbook's local SQLite option applies to the Python service only, not the complete web app.
+Provide the same variables through `model/.env` and `frontend/.env.local`, and set `PYTHON_API_URL=http://localhost:8000` for the frontend. The [runbook](docs/operations/09_RUNBOOK.md) lists every variable.
 
-## URLs and API
+<details>
+<summary><b>🔧 Environment variable reference</b></summary>
 
-| Service | Local URL | Purpose |
+<br/>
+
+| Variable | Used by | Purpose |
 |---|---|---|
-| Next.js frontend | `http://localhost:3000` | Patient and clinician web interface |
-| Python API | `http://localhost:8000` | OCR and prescription processing |
-| Health check | `http://localhost:8000/health` | Backend readiness check; no API token required |
-| OpenAPI docs | `http://localhost:8000/docs` | Interactive FastAPI documentation |
+| `GEMINI_API_KEY` | Backend, some frontend routes | Gemini authentication |
+| `DATABASE_URL` | Both | Shared PostgreSQL connection string |
+| `API_TOKEN` / `PYTHON_API_TOKEN` | Backend / frontend | `X-API-Key` shared secret. The two must match. |
+| `JWT_SECRET` | Frontend | JWT signing and verification |
+| `FRONTEND_ORIGIN` | Backend | CORS origin (defaults to `*` if unset, so set it) |
+| `PYTHON_API_URL` | Frontend | Backend base URL |
+| `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_URL` | Frontend | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_ANON_KEY` | Frontend | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Frontend (server) | Secret storage key |
+| `SUPABASE_STORAGE_BUCKET` / `_FOLDER` | Frontend | Defaults: `OCR_Images` / `uploads` |
+| `PADDLEOCR_DEVICE`, `PADDLEOCR_LANG` | Backend | OCR device and language (CPU, English) |
+| `HOST`, `PORT` | Backend | Bind address (`0.0.0.0:8000`) |
 
-Compose maps ports 3000 and 8000 to the host. The API specification documents extraction, confirmation, patient record, observation, and trend endpoints, as well as authentication requirements. See [API specification](docs/api-data/05_API_SPEC.md).
+</details>
 
-## Database and uploaded files
+---
 
-The Python service uses SQLAlchemy Core and can connect to PostgreSQL or SQLite. The Next.js application also connects to PostgreSQL through `DATABASE_URL`, so use PostgreSQL for the full application. The Python service creates its managed tables at startup; the repository does not provide an automatic migration runner for the full schema. Review the SQL schema and migration scripts under `scratch/` and apply the appropriate SQL to your database deliberately. See [data model](docs/api-data/04_DATA_MODEL.md).
+## 📁 Repository layout
 
-Docker Compose uses named volumes for the Paddle model cache and backend SQLite fallback. PostgreSQL data is managed by the configured database provider, not by a Compose volume. Prescription image storage is integrated with Supabase Storage. Configure the bucket and access policies in Supabase; the application does not configure a production backup schedule. Back up the database and uploaded files through your chosen provider's documented procedures.
-
-## Prescription processing
-
-1. An image is uploaded through the application.
-2. PaddleOCR extracts text and confidence data.
-3. Gemini attempts to structure the extraction into prescription fields.
-4. The service validates fields and looks up medicine candidates against its medicine data.
-5. The result remains a draft for clinician review and correction.
-6. On confirmation, the reviewed record is saved to the patient's medical record and timeline.
-
-OCR and AI can misread or omit information. The generated output is not a diagnosis or prescription, and must not be used clinically until reviewed and confirmed by a licensed clinician.
-
-## Development commands
-
-Frontend commands from `frontend/`:
-
-```powershell
-npm ci
-npm run dev
-npm run lint
-npm run build
-npm run start
+```text
+PharmaBrain/
+├── frontend/                 # Next.js 16 app: patient + doctor portals, API routes
+│   ├── app/                  #   pages and route handlers (auth, patient, doctor, ocr, ...)
+│   ├── components/           #   MedicineEditor, VitalsDisplay, charts, modals
+│   └── lib/                  #   medicationLifecycle, trends, auth, db, storage
+├── model/                    # FastAPI OCR + structuring service, Dockerfile, bulk medicine importer
+├── Flows/                    # Interactive HTML flow diagrams (OCR, timeline, trends, sharing)
+├── docs/                     # Architecture, pipeline, API, security, runbook, domain docs
+├── scratch/                  # SQL schema, migrations and ad hoc test scripts
+├── docker-compose.yml        # Frontend + OCR service orchestration
+├── .env.example              # Environment template
+└── CHANGELOG.md
 ```
 
-`package.json` does not define a dedicated test or type-check script. The repository contains ad hoc scripts under `scratch/` and `model/`; they are not presented as a maintained automated test suite. For backend setup, see [Python requirements](model/requirements.txt). For Docker integration, use `docker compose up --build`.
+---
 
-## Security and privacy
+## 📚 Documentation
 
-- Treat prescription images and extracted records as sensitive health information. Use synthetic data for local development unless your environment is approved for real patient data.
-- Store secrets outside source control. Do not expose `SUPABASE_SERVICE_ROLE_KEY`, database credentials, Gemini keys, API tokens, or `JWT_SECRET` to browser code.
-- Configure a strong `JWT_SECRET` and matching strong `API_TOKEN`/`PYTHON_API_TOKEN`. Source and Compose contain development fallbacks that are unsuitable for deployment.
-- The Python service defaults CORS to `*` when `FRONTEND_ORIGIN` is unset. Set the intended origin explicitly.
-- Compose currently disables TLS certificate validation in the frontend process. This must be addressed before deployment with sensitive data.
-- Review Supabase Storage policies and database access controls for your deployment. The README does not establish regulatory compliance or a security certification.
-- Avoid sharing logs that may contain request or operational details. Do not put patient data or secrets in issue reports.
-
-See [security and privacy documentation](docs/operations/08_SECURITY_PRIVACY.md) and [known issues](docs/operations/13_KNOWN_ISSUES.md).
-
-## Troubleshooting
-
-| Symptom | Checks |
+| | |
 |---|---|
-| Backend reports a missing Gemini key | Set `GEMINI_API_KEY` for the Python process/container and restart it. |
-| Database connection fails | Confirm `DATABASE_URL` is valid and reachable from both services. For the full app it must point to PostgreSQL; SQLite only covers the Python service. |
-| Frontend cannot call the Python service | In Compose use the internal URL configured by Compose; in local development set `PYTHON_API_URL=http://localhost:8000`. Ensure `PYTHON_API_TOKEN` matches backend `API_TOKEN`. |
-| Uploads fail or images do not display | Check the Supabase URL and key variables, bucket name, bucket policies, and storage availability. |
-| Backend takes a long time to become healthy | Initial PaddleOCR model setup can take several minutes. Inspect `docker compose logs -f python-ocr` and the `/health` endpoint. |
-| Gemini structuring fails | Check API key validity, provider availability, quota, and backend logs. A failed structuring attempt may require retrying the extraction workflow. |
-| A local port is already in use | Stop the process using port 3000 or 8000, or adjust the host-side port mapping in Compose. |
-| Authentication behaves unexpectedly | Set `JWT_SECRET` consistently for the frontend and restart it; do not rely on the source fallback. |
+| 🏛️ [Architecture](docs/architecture/02_ARCHITECTURE.md) | Components, failure modes and design principles |
+| 🔄 [Pipeline spec](docs/pipeline/03_PIPELINE_SPEC.md) | Every stage from image to confirmed record |
+| 🔌 [API spec](docs/api-data/05_API_SPEC.md) | Endpoints and authentication |
+| 🗄️ [Data model](docs/api-data/04_DATA_MODEL.md) | Tables and relationships |
+| 💊 [Medication lifecycle](docs/Medication-Lifecycle/README.md) | Reconciliation rules and audit trail |
+| 📈 [Trend analysis](docs/Trend-Analysis/README.md) | Clinical bands, gating and caching |
+| 🔒 [Security & privacy](docs/operations/08_SECURITY_PRIVACY.md) | Data flows and risks |
+| 🛠️ [Runbook](docs/operations/09_RUNBOOK.md) · [Known issues](docs/operations/13_KNOWN_ISSUES.md) | Operating and troubleshooting |
 
-For additional operational guidance, see the [runbook](docs/operations/09_RUNBOOK.md).
+The `Flows/` folder also contains interactive HTML diagrams you can open in a browser.
 
-## Limitations and roadmap
+---
 
-Known constraints include CPU-based OCR in the default Compose configuration, no automatic full-schema migration framework, and security configuration that needs review before deployment. The project roadmap lists GPU acceleration, PDF and multi-page support, broader medicine data, and hybrid matching as planned improvements. Check the [roadmap](docs/architecture/12_ROADMAP.md) and [known issues](docs/operations/13_KNOWN_ISSUES.md) for current project status.
+## 🧪 Development
 
-## Contributing
+```bash
+cd frontend
+npm run dev      # dev server
+npm run lint     # ESLint
+npm run build    # production build
+```
+
+There is no unified test runner yet. Ad hoc verification scripts live in `scratch/` (for example `test_trend_eligibility.js`, `test_e2e_auth_isolation.py` and `test_document_lifecycle.py`). Apply the SQL under `scratch/` to your database deliberately, because there is no automatic migration framework yet.
+
+---
+
+## 🔐 Security notes
+
+Please read before deploying anywhere that matters:
+
+- Set strong, unique `JWT_SECRET`, `API_TOKEN` and `PYTHON_API_TOKEN`, and never rely on the fallbacks in source or Compose.
+- Set `FRONTEND_ORIGIN` explicitly, because CORS defaults to `*` when it is unset.
+- The provided `docker-compose.yml` sets `NODE_TLS_REJECT_UNAUTHORIZED=0` for the frontend. **Remove it** before handling sensitive data.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` server-side only, and review your Supabase Storage policies.
+- Never put real patient data or secrets in issues, logs or commits.
+
+
+
+---
+
+## 🤝 Contributing
 
 1. Create a focused feature branch.
-2. Make and document a scoped change.
-3. Run the relevant lint, build, or service checks available for the change.
-4. Open a pull request describing the change and its validation.
+2. Keep the change scoped and documented.
+3. Run the relevant checks (`npm run lint`, `npm run build`, or the service checks).
+4. Open a pull request that describes the change and how you validated it.
 
-Do not include real patient data, credentials, or generated local artifacts in contributions.
+Do not include real patient data, credentials or generated local artifacts.
 
-## License
 
-No license file is currently present in the repository. The project's license has not been specified.
+---
+
+<div align="center">
+
+
+<sub>PharmaBrain is a research and engineering project. It is not a medical device and does not provide medical advice.</sub>
+
+</div>
