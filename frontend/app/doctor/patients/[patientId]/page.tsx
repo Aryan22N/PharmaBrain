@@ -28,8 +28,14 @@ import {
   Phone,
   MapPin,
   Mail,
+  ChevronRight,
 } from "lucide-react";
 import { LongitudinalTrendsDashboard } from "@/components/trends/LongitudinalTrendsDashboard";
+import {
+  getMedicationDescription,
+  getConditionDescription,
+  getAllergyDescription,
+} from "@/lib/medicalDescriptions";
 
 interface MedicationItem {
   id: number;
@@ -49,9 +55,37 @@ interface MedicationItem {
   reconciliation_category?: string | null;
   actual_end_date?: string | null;
   expected_end_date?: string | null;
+  duration_raw?: string | null;
+  duration_days?: number | null;
   discontinued_reason?: string | null;
   reference_id?: string | number | null;
   source?: string | null;
+}
+
+interface StructuredConditionItem {
+  id: string | number;
+  name: string;
+  category: string;
+  status: string;
+  source: string;
+  diagnosedDate?: string | null;
+  icd10Code?: string | null;
+  severity?: string | null;
+  doctor?: string | null;
+  facility?: string | null;
+  notes?: string | null;
+}
+
+interface StructuredAllergyItem {
+  id: string | number;
+  name: string;
+  severity: string;
+  status: string;
+  reaction: string;
+  source: string;
+  category?: string | null;
+  notes?: string | null;
+  addedDate?: string | null;
 }
 
 interface ObservationItem {
@@ -493,6 +527,9 @@ export default function DoctorPatientRecordPage() {
   const [isMedicationsModalOpen, setIsMedicationsModalOpen] = useState(false);
   const [showAllDocs, setShowAllDocs] = useState(false);
   const [docModalTab, setDocModalTab] = useState<"scan" | "details">("scan");
+  const [selectedConditionForModal, setSelectedConditionForModal] = useState<StructuredConditionItem | null>(null);
+  const [selectedAllergyForModal, setSelectedAllergyForModal] = useState<StructuredAllergyItem | null>(null);
+  const [selectedMedicationForModal, setSelectedMedicationForModal] = useState<MedicationItem | null>(null);
 
   const loadDossier = React.useCallback(async () => {
     if (!cleanPatientId) {
@@ -715,15 +752,6 @@ export default function DoctorPatientRecordPage() {
     : null;
 
   // Normalized conditions from database + onboarding without hardcoding category/source
-  interface StructuredConditionItem {
-    id: string | number;
-    name: string;
-    category: string;
-    status: string;
-    source: string;
-    diagnosedDate?: string | null;
-  }
-
   const structuredConditions: StructuredConditionItem[] = [];
   const seenNames = new Set<string>();
 
@@ -743,6 +771,11 @@ export default function DoctorPatientRecordPage() {
             ? formatHospitalName(c.facility)
             : "Clinical Record Confirmed",
           diagnosedDate: c.diagnosed_date || null,
+          icd10Code: c.icd10_code || null,
+          severity: c.severity || null,
+          doctor: c.doctor ? formatDoctorName(c.doctor) : null,
+          facility: c.facility ? formatHospitalName(c.facility) : null,
+          notes: c.notes || null,
         });
       }
     });
@@ -771,15 +804,6 @@ export default function DoctorPatientRecordPage() {
   });
 
   // Structured allergies without hardcoding counts or intake labels
-  interface StructuredAllergyItem {
-    id: string | number;
-    name: string;
-    severity: string;
-    status: string;
-    reaction: string;
-    source: string;
-  }
-
   const structuredAllergies: StructuredAllergyItem[] = [];
   const seenAllergens = new Set<string>();
 
@@ -795,6 +819,9 @@ export default function DoctorPatientRecordPage() {
           status: a.verification_status || a.status || "Confirmed",
           reaction: a.reaction ? `Reaction: ${a.reaction}` : a.notes ? String(a.notes) : "Documented clinical allergy",
           source: a.source ? `Source: ${a.source}` : "Clinical Record",
+          category: a.category || null,
+          notes: a.notes || null,
+          addedDate: a.added_date || null,
         });
       }
     });
@@ -1526,18 +1553,31 @@ export default function DoctorPatientRecordPage() {
                     <div className="space-y-2">
                       {structuredConditions.length > 0 ? (
                         structuredConditions.map((cond) => (
-                          <div key={cond.id} className="p-2.5 rounded-lg bg-white border border-[#DCE4ED]">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-[#0F172A]">{cond.name}</span>
-                              <span className="text-[10px] font-mono text-[#64748B] bg-[#F1F5F9] px-1.5 py-0.2 rounded">
-                                {cond.category}
-                              </span>
+                          <button
+                            key={cond.id}
+                            type="button"
+                            onClick={() => setSelectedConditionForModal(cond)}
+                            className="w-full text-left p-2.5 rounded-lg bg-white border border-[#DCE4ED] hover:border-[#2F7D78] hover:bg-[#F8FAFC] transition-all cursor-pointer shadow-2xs group flex items-start justify-between gap-2"
+                            title="Click to view condition description and clinical details"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-bold text-[#0F172A] group-hover:text-[#2F7D78] transition-colors truncate">
+                                  {cond.name}
+                                </span>
+                                <span className="text-[10px] font-mono text-[#64748B] bg-[#F1F5F9] px-1.5 py-0.2 rounded shrink-0">
+                                  {cond.category}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[11px] text-[#2F7D78] mt-1 font-medium truncate">
+                                <CheckCircle2 className="w-3 h-3 text-[#2F7D78] shrink-0" />
+                                <span className="truncate">{cond.source}{cond.diagnosedDate ? ` • ${cond.diagnosedDate}` : ""}</span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1.5 text-[11px] text-[#2F7D78] mt-1 font-medium">
-                              <CheckCircle2 className="w-3 h-3 text-[#2F7D78]" />
-                              <span>{cond.source}{cond.diagnosedDate ? ` • ${cond.diagnosedDate}` : ""}</span>
+                            <div className="p-1 text-[#94A3B8] group-hover:text-[#2F7D78] transition-colors shrink-0 self-center">
+                              <ChevronRight className="w-3.5 h-3.5" />
                             </div>
-                          </div>
+                          </button>
                         ))
                       ) : (
                         <p className="text-xs text-[#64748B] italic p-2">No chronic or diagnosed conditions declared.</p>
@@ -1574,17 +1614,30 @@ export default function DoctorPatientRecordPage() {
                     <div className="space-y-2">
                       {structuredAllergies.length > 0 ? (
                         structuredAllergies.map((a) => (
-                          <div key={a.id} className="p-2.5 rounded-lg bg-white border border-[#FDE68A]">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-[#DC2626]">{a.name}</span>
-                              <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#FEE2E2] text-[#DC2626] font-semibold">
-                                {a.severity}
-                              </span>
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => setSelectedAllergyForModal(a)}
+                            className="w-full text-left p-2.5 rounded-lg bg-white border border-[#FDE68A] hover:border-[#DC2626] hover:bg-[#FFF5F5] transition-all cursor-pointer shadow-2xs group flex items-start justify-between gap-2"
+                            title="Click to view allergen description, reaction profile and precautions"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-bold text-[#DC2626] group-hover:text-[#B91C1C] transition-colors truncate">
+                                  {a.name}
+                                </span>
+                                <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#FEE2E2] text-[#DC2626] font-semibold shrink-0">
+                                  {a.severity}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[#64748B] mt-1 leading-tight line-clamp-1">
+                                {a.reaction}
+                              </p>
                             </div>
-                            <p className="text-[11px] text-[#64748B] mt-1 leading-tight">
-                              {a.reaction}
-                            </p>
-                          </div>
+                            <div className="p-1 text-[#FCA5A5] group-hover:text-[#DC2626] transition-colors shrink-0 self-center">
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </div>
+                          </button>
                         ))
                       ) : (
                         <p className="text-xs text-[#64748B] italic p-2">No known allergies on record.</p>
@@ -1619,26 +1672,39 @@ export default function DoctorPatientRecordPage() {
                     <div className="space-y-2">
                       {safeMedications.active.length > 0 ? (
                         (showAllMedications ? safeMedications.active : safeMedications.active.slice(0, 5)).map((m) => (
-                          <div key={m.id} className="p-2.5 rounded-lg bg-white border border-[#DCE4ED]">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-[#0F172A]">{m.name}</span>
-                              {m.frequency ? (
-                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#E8F6F4] text-[#2F7D78] font-bold">
-                                  {m.frequency}
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setSelectedMedicationForModal(m)}
+                            className="w-full text-left p-2.5 rounded-lg bg-white border border-[#DCE4ED] hover:border-[#2F7D78] hover:bg-[#F8FAFC] transition-all cursor-pointer shadow-2xs group flex items-start justify-between gap-2"
+                            title="Click to view medication pharmacology, indication and full description"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-bold text-[#0F172A] group-hover:text-[#2F7D78] transition-colors truncate">
+                                  {m.name}
                                 </span>
-                              ) : m.indication ? (
-                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#F1F5F9] text-[#64748B] font-medium">
-                                  {m.indication}
-                                </span>
-                              ) : null}
+                                {m.frequency ? (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#E8F6F4] text-[#2F7D78] font-bold font-mono shrink-0">
+                                    {m.frequency}
+                                  </span>
+                                ) : m.indication ? (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#F1F5F9] text-[#64748B] font-medium shrink-0 truncate max-w-[120px]">
+                                    {m.indication}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-[11px] text-[#64748B] mt-1 truncate">
+                                {m.strength || ""} {m.route ? `• ${m.route}` : ""}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-[#94A3B8] mt-1 font-mono truncate">
+                                <span>Prescriber: {formatDoctorName(m.doctor)}</span>
+                              </div>
                             </div>
-                            <div className="text-[11px] text-[#64748B] mt-1">
-                              {m.strength || ""} {m.route ? `• ${m.route}` : ""}
+                            <div className="p-1 text-[#94A3B8] group-hover:text-[#2F7D78] transition-colors shrink-0 self-center">
+                              <ChevronRight className="w-3.5 h-3.5" />
                             </div>
-                            <div className="flex items-center gap-1.5 text-[10px] text-[#94A3B8] mt-1 font-mono">
-                              <span>Prescriber: {formatDoctorName(m.doctor)}</span>
-                            </div>
-                          </div>
+                          </button>
                         ))
                       ) : (
                         <p className="text-xs text-[#64748B] italic p-2">No active medications recorded.</p>
@@ -2435,19 +2501,27 @@ export default function DoctorPatientRecordPage() {
             <div className="overflow-y-auto flex-1 pr-1 space-y-2.5">
               {safeMedications.active.length > 0 ? (
                 safeMedications.active.map((m) => (
-                  <div key={m.id} className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col gap-2">
+                  <div
+                    key={m.id}
+                    onClick={() => setSelectedMedicationForModal(m)}
+                    className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] hover:border-[#2F7D78] hover:bg-white cursor-pointer transition-all flex flex-col gap-2 group shadow-2xs"
+                    title="Click to view full medication pharmacology, indications, and description"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-[#0F172A]">{m.name}</span>
+                        <span className="text-xs font-bold text-[#0F172A] group-hover:text-[#2F7D78] transition-colors">{m.name}</span>
                         {m.strength && (
                           <span className="text-[11px] font-mono text-[#64748B] bg-white px-2 py-0.5 rounded border border-[#DCE4ED]">
                             {m.strength}
                           </span>
                         )}
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78]">
-                        Active
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78]">
+                          Active
+                        </span>
+                        <ChevronRight className="w-3.5 h-3.5 text-[#94A3B8] group-hover:text-[#2F7D78] transition-colors" />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-[#64748B] pt-1">
@@ -2551,6 +2625,319 @@ export default function DoctorPatientRecordPage() {
           </div>
         </div>
       )}
+
+      {/* ==========================================
+          6. ACTIVE CONDITION DESCRIPTION MODAL
+          ========================================== */}
+      {selectedConditionForModal && (() => {
+        const cond = selectedConditionForModal;
+        const desc = getConditionDescription(cond.name, cond.notes);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-5 sm:p-6 border border-[#DCE4ED] shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+              <div className="flex items-start justify-between border-b border-[#DCE4ED] pb-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center shrink-0 border border-[#A7E9DF]">
+                    <Activity className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-base text-[#0F172A]">{cond.name}</h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF]">
+                        {cond.status || "Active"}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono text-[#64748B] bg-[#F1F5F9] border border-[#E2E8F0]">
+                        {cond.category || "Clinical"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#64748B] mt-0.5">
+                      Clinical Condition Profile & Diagnostic Description
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedConditionForModal(null)}
+                  className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="overflow-y-auto flex-1 pr-1 space-y-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B] block">
+                    Clinical Overview & Description
+                  </span>
+                  <p className="text-xs text-[#1E293B] leading-relaxed">
+                    {desc.overview}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Clinical Status</span>
+                    <span className="text-xs font-bold text-[#0F172A] mt-0.5 block">{cond.status || "Active"}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Category / Type</span>
+                    <span className="text-xs font-bold text-[#0F172A] mt-0.5 block">{cond.category || "Condition"}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Diagnosis Source</span>
+                    <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block">{cond.source}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Documented Date</span>
+                    <span className="text-xs font-mono font-medium text-[#0F172A] mt-0.5 block">
+                      {cond.diagnosedDate || "Present in patient medical dossier"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#E8F6F4]/50 border border-[#A7E9DF] space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[#2F7D78] block">
+                    Clinical Guideline Impact & Progression
+                  </span>
+                  <p className="text-xs text-[#334155] leading-relaxed">
+                    {desc.clinicalImpact}
+                  </p>
+                  <p className="text-xs text-[#2F7D78] font-medium pt-1.5 border-t border-[#A7E9DF]/60">
+                    <strong>Care Management Protocol:</strong> {desc.management}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-[#DCE4ED] flex items-center justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedConditionForModal(null)}
+                  className="px-4 py-2 bg-[#2F7D78] text-white rounded-xl text-xs font-semibold hover:bg-[#256B66] transition-colors"
+                >
+                  Close Description
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ==========================================
+          7. ALLERGY DESCRIPTION MODAL
+          ========================================== */}
+      {selectedAllergyForModal && (() => {
+        const allergy = selectedAllergyForModal;
+        const desc = getAllergyDescription(allergy.name, allergy.reaction);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-5 sm:p-6 border border-[#FECACA] shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+              <div className="flex items-start justify-between border-b border-[#FECACA] pb-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#FEF2F2] text-[#DC2626] flex items-center justify-center shrink-0 border border-[#FCA5A5]">
+                    <AlertCircle className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-base text-[#991B1B]">{allergy.name}</h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FEE2E2] text-[#DC2626] border border-[#FECACA]">
+                        {allergy.severity || "Active Flag"}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono text-[#991B1B] bg-[#FFF5F5] border border-[#FED7D7]">
+                        {allergy.status || "Confirmed"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#7F1D1D] mt-0.5">
+                      Documented Patient Allergen & Hypersensitivity Flag
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAllergyForModal(null)}
+                  className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="overflow-y-auto flex-1 pr-1 space-y-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-[#FEF2F2] border border-[#FCA5A5] space-y-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[#DC2626] block">
+                    Documented Allergic Reaction
+                  </span>
+                  <p className="text-xs font-semibold text-[#7F1D1D] leading-snug">
+                    {allergy.reaction || "Adverse allergic / hypersensitivity reaction"}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] space-y-2">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#92400E] block">
+                      Allergen Classification
+                    </span>
+                    <p className="text-xs text-[#78350F] font-semibold mt-0.5">
+                      {desc.allergenClass}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#92400E] block">
+                      Reaction Manifestation & Pathophysiology
+                    </span>
+                    <p className="text-xs text-[#78350F] leading-relaxed mt-0.5">
+                      {desc.reactionProfile}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Severity Rating</span>
+                    <span className="text-xs font-bold text-[#DC2626] mt-0.5 block">{allergy.severity}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Source Record</span>
+                    <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block">{allergy.source}</span>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-900 text-white space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px]">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Prescription Safety Advisory</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    {desc.precautions}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-[#FECACA] flex items-center justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedAllergyForModal(null)}
+                  className="px-4 py-2 bg-[#DC2626] text-white rounded-xl text-xs font-semibold hover:bg-[#B91C1C] transition-colors"
+                >
+                  Close Description
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ==========================================
+          8. MEDICATION DESCRIPTION MODAL
+          ========================================== */}
+      {selectedMedicationForModal && (() => {
+        const med = selectedMedicationForModal;
+        const desc = getMedicationDescription(med.name, med.indication);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-5 sm:p-6 border border-[#DCE4ED] shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+              <div className="flex items-start justify-between border-b border-[#DCE4ED] pb-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#E8F6F4] text-[#2F7D78] flex items-center justify-center shrink-0 border border-[#A7E9DF]">
+                    <Pill className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-base text-[#0F172A]">{med.name}</h3>
+                      {med.strength && (
+                        <span className="text-[11px] font-mono text-[#2F7D78] bg-[#E8F6F4] px-2 py-0.5 rounded border border-[#A7E9DF] font-bold">
+                          {med.strength}
+                        </span>
+                      )}
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78]">
+                        {med.status || "Active"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#64748B] mt-0.5">
+                      Pharmacological Classification & Regimen Profile
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMedicationForModal(null)}
+                  className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="overflow-y-auto flex-1 pr-1 space-y-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-[#64748B] block">Therapeutic Class</span>
+                    <span className="text-xs font-bold text-[#0F172A]">{desc.drugClass}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-[#64748B] block">Mechanism of Action & Clinical Description</span>
+                    <p className="text-xs text-[#334155] leading-relaxed mt-0.5">{desc.mechanism}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-[#64748B] block">Therapeutic Indication</span>
+                    <p className="text-xs text-[#2F7D78] font-semibold leading-relaxed mt-0.5">{desc.indications}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Frequency / Timing</span>
+                    <span className="text-xs font-bold text-[#0F172A] font-mono mt-0.5 block">{med.frequency || "As prescribed"}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Route & Form</span>
+                    <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block">{med.route || "Oral"} {med.form ? `(${med.form})` : ""}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Prescriber</span>
+                    <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block truncate">{formatDoctorName(med.doctor)}</span>
+                  </div>
+                  {med.start_date && (
+                    <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                      <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Start Date</span>
+                      <span className="text-xs font-mono text-[#0F172A] mt-0.5 block">{med.start_date}</span>
+                    </div>
+                  )}
+                  {med.duration_raw && (
+                    <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                      <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Duration</span>
+                      <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block">{med.duration_raw}</span>
+                    </div>
+                  )}
+                  {med.hospital && (
+                    <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                      <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Facility</span>
+                      <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block truncate">{formatHospitalName(med.hospital)}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] space-y-1">
+                  <div className="flex items-center gap-1.5 text-[#92400E] font-bold text-[11px]">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Clinical Precautions & Guidance</span>
+                  </div>
+                  <p className="text-[11px] text-[#78350F] leading-relaxed">
+                    {desc.precautions}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-[#DCE4ED] flex items-center justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedMedicationForModal(null)}
+                  className="px-4 py-2 bg-[#2F7D78] text-white rounded-xl text-xs font-semibold hover:bg-[#256B66] transition-colors"
+                >
+                  Close Description
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
