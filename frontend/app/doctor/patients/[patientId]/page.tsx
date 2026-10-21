@@ -29,6 +29,7 @@ import {
   MapPin,
   Mail,
 } from "lucide-react";
+import { LongitudinalTrendsDashboard } from "@/components/trends/LongitudinalTrendsDashboard";
 
 interface MedicationItem {
   id: number;
@@ -1988,215 +1989,24 @@ export default function DoctorPatientRecordPage() {
             </div>
           </section>
 
-          {/* SECTION 4: TWO-COLUMN DEEP-DIVE (8 cols vs 4 cols) */}
+          {/* SECTION 4: LONGITUDINAL HEALTH TRENDS & RISK PREDICTION (Full Width) */}
+          <section id="biomarkers" className="bg-transparent space-y-6">
+            <LongitudinalTrendsDashboard
+              patientId={cleanPatientId}
+              patientName={patient?.name}
+              documents={safeDocs}
+              isDoctorView={true}
+              onViewDocScan={(doc) => {
+                setSelectedDocForModal(doc);
+                setDocModalTab("scan");
+              }}
+            />
+          </section>
+
+          {/* SECTION 5: TWO-COLUMN DEEP-DIVE (Timeline 8 cols vs Documents 4 cols) */}
           <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* LEFT COLUMN (8 cols): Longitudinal Biomarkers & Medical Timeline */}
+            {/* LEFT COLUMN (8 cols): Medical Timeline */}
             <div className="lg:col-span-8 flex flex-col gap-6">
-              {/* Longitudinal Trajectories Card (Interactive Charts) */}
-              <div id="biomarkers" className="bg-white rounded-xl p-5 sm:p-6 border border-[#DCE4ED] shadow-xs flex flex-col gap-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-[#0F172A]">
-                      Longitudinal Biomarkers & Vitals
-                    </h3>
-                    <p className="text-xs text-[#64748B]">
-                      Multi-encounter trend progression with reference physiological bounds
-                    </p>
-                  </div>
-
-                  {/* Timeframe Selector */}
-                  <div className="flex items-center bg-[#F1F5F9] p-1 rounded-lg border border-[#DCE4ED] self-start sm:self-center">
-                    {(["6M", "1Y", "3Y", "ALL"] as const).map((range) => (
-                      <button
-                        key={range}
-                        type="button"
-                        onClick={() => setTimeRange(range)}
-                        className={`px-2.5 py-1 rounded text-xs transition-colors ${
-                          timeRange === range
-                            ? "bg-white text-[#2F7D78] font-bold shadow-xs"
-                            : "text-[#64748B] hover:text-[#0F172A]"
-                        }`}
-                      >
-                        {range}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 3 Visual Tracks */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Track 1: HbA1c Progression */}
-                  <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col justify-between gap-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-[11px] font-bold text-[#64748B] uppercase">
-                          HbA1c Glycated
-                        </span>
-                        <div className="flex items-baseline gap-1 mt-0.5">
-                          {latestHba1c?.value != null ? (
-                            <span className="text-xl font-bold text-[#0F172A]">
-                              {latestHba1c.value}%
-                            </span>
-                          ) : (
-                            <span className="text-xl font-bold text-[#94A3B8]">--</span>
-                          )}
-                        </div>
-                      </div>
-                      {latestHba1c?.value != null ? (
-                        Number(latestHba1c.value) > 7.0 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
-                            Target &lt; 7.0%
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
-                            Optimal &lt; 7.0%
-                          </span>
-                        )
-                      ) : (
-                        <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-semibold">
-                          Target &lt; 7.0%
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Dynamic Vector Sparkline Chart */}
-                    <DynamicSparkline
-                      points={filteredHba1c}
-                      color="#2F7D78"
-                      targetValue={7.0}
-                      targetLabel="Target < 7.0%"
-                      emptyMessage="No HbA1c lab results recorded in database"
-                    />
-
-                    <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
-                      <span>
-                        Baseline: {baselineHba1c ? `${baselineHba1c.value}%` : "Not recorded"}
-                      </span>
-                      <span>
-                        Latest: {currentHba1c ? `${currentHba1c.value}%` : "Not recorded"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Track 2: Fasting Blood Glucose */}
-                  <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col justify-between gap-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-[11px] font-bold text-[#64748B] uppercase">
-                          Fasting Glucose
-                        </span>
-                        <div className="flex items-baseline gap-1 mt-0.5">
-                          {latestGlucose?.value != null ? (
-                            <>
-                              <span className="text-xl font-bold text-[#0F172A]">
-                                {latestGlucose.value}
-                              </span>
-                              <span className="text-[11px] text-[#64748B]">mg/dL</span>
-                            </>
-                          ) : (
-                            <span className="text-xl font-bold text-[#94A3B8]">--</span>
-                          )}
-                        </div>
-                      </div>
-                      {latestGlucose?.value != null ? (
-                        Number(latestGlucose.value) > 130 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
-                            Above Goal
-                          </span>
-                        ) : Number(latestGlucose.value) < 70 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#FEE2E2] text-[#DC2626] text-[10px] font-bold">
-                            Low Alert
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
-                            In Target
-                          </span>
-                        )
-                      ) : (
-                        <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-semibold">
-                          Goal 70-130
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Dynamic Vector Sparkline Chart */}
-                    <DynamicSparkline
-                      points={filteredGlucose}
-                      color="#2F7D78"
-                      targetBand={{ min: 70, max: 130 }}
-                      emptyMessage="No fasting glucose readings recorded in database"
-                    />
-
-                    <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
-                      <span>
-                        Baseline: {baselineGlucose ? `${baselineGlucose.value} mg/dL` : "Not recorded"}
-                      </span>
-                      <span>
-                        Current: {currentGlucose ? `${currentGlucose.value} mg/dL` : "Not recorded"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Track 3: Blood Pressure Progression */}
-                  <div className="p-3.5 rounded-xl bg-[#F7F9FB] border border-[#DCE4ED] flex flex-col justify-between gap-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-[11px] font-bold text-[#64748B] uppercase">
-                          Blood Pressure
-                        </span>
-                        <div className="flex items-baseline gap-1 mt-0.5">
-                          {latestBp?.systolic && latestBp?.diastolic ? (
-                            <>
-                              <span className="text-xl font-bold text-[#0F172A]">
-                                {latestBp.systolic}/{latestBp.diastolic}
-                              </span>
-                              <span className="text-[11px] text-[#64748B]">mmHg</span>
-                            </>
-                          ) : (
-                            <span className="text-xl font-bold text-[#94A3B8]">-- / --</span>
-                          )}
-                        </div>
-                      </div>
-                      {latestBp?.systolic && latestBp?.diastolic ? (
-                        latestBp.systolic >= 140 || latestBp.diastolic >= 90 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#FEE2E2] text-[#DC2626] text-[10px] font-bold">
-                            Stage 2 HTN
-                          </span>
-                        ) : latestBp.systolic >= 130 || latestBp.diastolic >= 80 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] text-[10px] font-bold">
-                            Stage 1 HTN
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-[#E8F6F4] text-[#2F7D78] text-[10px] font-bold">
-                            Controlled
-                          </span>
-                        )
-                      ) : (
-                        <span className="px-2 py-0.5 rounded bg-[#F1F5F9] text-[#64748B] text-[10px] font-semibold">
-                          Goal &lt; 130/80
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Dynamic Dual-Line Vector Chart */}
-                    <DualBpSparkline
-                      points={filteredBp}
-                      emptyMessage="No blood pressure observations recorded in database"
-                    />
-
-                    <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
-                      <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D78]" />
-                        <span>Sys: {currentBp?.systolic != null ? currentBp.systolic : "--"}</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#2874B5]" />
-                        <span>Dia: {currentBp?.diastolic != null ? currentBp.diastolic : "--"}</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* Chronological Medical Timeline with Filters */}
               <div id="timeline" className="bg-white rounded-xl p-5 sm:p-6 border border-[#DCE4ED] shadow-xs flex flex-col gap-5">
