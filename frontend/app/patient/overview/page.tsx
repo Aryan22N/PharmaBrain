@@ -27,8 +27,11 @@ import {
   X,
   Loader2,
   ShieldAlert,
+  User,
+  ShieldCheck,
 } from "lucide-react";
 import { usePatientDashboard } from "@/app/patient/context";
+import { isManualMedication } from "@/lib/medicationLifecycle";
 
 // Dynamic SVG Sparkline Generator based on DB history points
 function Sparkline({
@@ -497,20 +500,35 @@ export default function OverviewPage() {
                     </div>
                   ) : (
                     activeMedsList.map((med: any, idx: number) => {
-                      const medSource =
-                        med.source === "Hospital HMS"
-                          ? "Prescription Scan"
-                          : med.source || "Prescription Scan";
+                      const isManual = isManualMedication(med);
+                      const medSource = isManual
+                        ? "Patient Manual Entry"
+                        : med.source === "Hospital HMS"
+                        ? "Hospital Verified Rx"
+                        : "Prescription Scan";
                       return (
                         <div
                           key={med.id || idx}
-                          className="p-3 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 space-y-1"
+                          className="p-3 rounded-lg bg-[#F3F6F9] border border-[#DCE4ED]/60 space-y-1.5"
                         >
                           <div className="flex items-start justify-between gap-1">
-                            <span className="text-[13px] text-[#111827] font-semibold">
-                              {med.name} {med.strength}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10.5px] bg-[#E8F6F4] text-[#256B66] font-semibold">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[13px] text-[#111827] font-semibold">
+                                {med.name} {med.strength}
+                              </span>
+                              {isManual ? (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                                  <User className="w-2.5 h-2.5 text-amber-600" />
+                                  Manual Entry
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF]">
+                                  <ShieldCheck className="w-2.5 h-2.5 text-[#2F7D78]" />
+                                  Rx Scan
+                                </span>
+                              )}
+                            </div>
+                            <span className="px-1.5 py-0.5 rounded text-[10.5px] bg-[#E8F6F4] text-[#256B66] font-semibold shrink-0">
                               Active
                             </span>
                           </div>
@@ -520,7 +538,7 @@ export default function OverviewPage() {
                           <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-[#64748B]">
                             <FileText className="w-3.5 h-3.5 text-[#2F7D78]" />
                             <span>
-                              Source: {medSource} ({med.doctor || "Physician"})
+                              Source: {medSource} ({isManual ? "Patient Self-Logged" : med.doctor || "Physician"})
                             </span>
                           </div>
                         </div>

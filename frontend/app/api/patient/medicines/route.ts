@@ -429,14 +429,23 @@ export async function GET(req: NextRequest) {
 
     try {
       const allDocs = await query(
-        `SELECT d.id, d."originalName", d."storedFilename", d."filePath"
+        `SELECT d.id, d."originalName", d."storedFilename", d."filePath", a."structuredResult"
          FROM "Document" d
+         LEFT JOIN "Analysis" a ON d.id = a."documentId"
          WHERE d."userId" = $1 OR d."patientId" = ANY($2::text[]);`,
         [payload.userId, patientIds]
       );
 
       allDocs.forEach((d: any) => {
         let img = d.storedFilename;
+        if (!img || img === "/sample_prescription.png") {
+          try {
+            const sr = typeof d.structuredResult === "string" ? JSON.parse(d.structuredResult) : d.structuredResult || {};
+            if (sr.image_url && sr.image_url !== "/sample_prescription.png") {
+              img = sr.image_url;
+            }
+          } catch (_) {}
+        }
         if (img && (img.startsWith("http://") || img.startsWith("https://") || img.startsWith("/uploads/") || img.startsWith("/"))) {
           docIdToImageMap.set(d.id, img);
         }
@@ -459,7 +468,7 @@ export async function GET(req: NextRequest) {
         let img: string | null = null;
         try {
           const dj = typeof cp.data_json === "string" ? JSON.parse(cp.data_json) : cp.data_json || {};
-          if (dj.image_url) img = dj.image_url;
+          if (dj.image_url && dj.image_url !== "/sample_prescription.png") img = dj.image_url;
         } catch (_) {}
 
         if (!img && cp.extraction_id && extractionToImageMap.has(cp.extraction_id)) {
@@ -475,15 +484,71 @@ export async function GET(req: NextRequest) {
     const courses: MedicationCourse[] = rows.map((r: any) => {
       const passed = isExpectedEndDatePassed(r.expected_end_date, todayStr);
 
-      let resolvedImageUrl: string = "/sample_prescription.png";
+      let resolvedImageUrl: string | null = null;
+
+      // 1. Direct IDs
       if (r.prescription_id && cpToImageMap.has(r.prescription_id)) {
         resolvedImageUrl = cpToImageMap.get(r.prescription_id)!;
       } else if (r.document_id && docIdToImageMap.has(r.document_id)) {
         resolvedImageUrl = docIdToImageMap.get(r.document_id)!;
-      } else if (r.reference_id) {
-        const m = String(r.reference_id).match(/CP-RX-(\d+)/);
-        if (m && cpToImageMap.has(parseInt(m[1], 10))) {
-          resolvedImageUrl = cpToImageMap.get(parseInt(m[1], 10))!;
+      }
+
+      // 2. Parse reference_id formats: RX-EXTRACTION-X, HMS-RX-X, CP-RX-X, RX-DOCUMENT-X, HMS-DOC-X
+      if (!resolvedImageUrl && r.reference_id) {
+        const refStr = String(r.reference_id).trim();
+
+        // Check CP pattern: CP-RX-12, RX-CP-12
+        const cpMatch = refStr.match(/(?:CP-RX-|RX-CP-)(\d+)/i);
+        if (cpMatch) {
+          const cpId = parseInt(cpMatch[1], 10);
+          if (cpToImageMap.has(cpId)) {
+            resolvedImageUrl = cpToImageMap.get(cpId)!;
+          }
+        }
+
+        // Check Extraction patterns: RX-EXTRACTION-54, HMS-RX-54, EXTRACTION-54
+        if (!resolvedImageUrl) {
+          const extMatch = refStr.match(/(?:RX-EXTRACTION-|HMS-RX-|EXTRACTION-)(\d+)/i);
+          if (extMatch) {
+            const extId = parseInt(extMatch[1], 10);
+            if (extractionToImageMap.has(extId)) {
+              resolvedImageUrl = extractionToImageMap.get(extId)!;
+            }
+          }
+        }
+
+        // Check Document patterns: RX-DOCUMENT-67, HMS-DOC-67, DOCUMENT-67, DOC-67
+        if (!resolvedImageUrl) {
+          const docMatch = refStr.match(/(?:RX-DOCUMENT-|HMS-DOC-|DOCUMENT-|DOC-)(\d+)/i);
+          if (docMatch) {
+            const docId = parseInt(docMatch[1], 10);
+            if (docIdToImageMap.has(docId)) {
+              resolvedImageUrl = docIdToImageMap.get(docId)!;
+            }
+          }
+        }
+
+        // Check raw numeric ID
+        if (!resolvedImageUrl && /^\d+$/.test(refStr)) {
+          const numId = parseInt(refStr, 10);
+          if (extractionToImageMap.has(numId)) {
+            resolvedImageUrl = extractionToImageMap.get(numId)!;
+          } else if (docIdToImageMap.has(numId)) {
+            resolvedImageUrl = docIdToImageMap.get(numId)!;
+          } else if (cpToImageMap.has(numId)) {
+            resolvedImageUrl = cpToImageMap.get(numId)!;
+          }
+        }
+      }
+
+      // 3. Fallback for Prescription Scan sources if not explicitly linked
+      if (!resolvedImageUrl) {
+        if (r.source === "Prescription Scan" || r.verification_status === "Prescription Verified") {
+          if (docIdToImageMap.size > 0) {
+            resolvedImageUrl = Array.from(docIdToImageMap.values())[0];
+          } else {
+            resolvedImageUrl = "/sample_prescription.png";
+          }
         }
       }
 

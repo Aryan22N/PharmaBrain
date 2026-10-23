@@ -91,6 +91,73 @@ export interface MedicationCourse {
 }
 
 /**
+ * Determines whether a medication record is a manual / self-reported entry
+ * vs an authenticated prescription document scan.
+ */
+export function isManualMedication(med: {
+  source?: string | null;
+  verification_status?: string | null;
+  verificationStatus?: string | null;
+  reference_id?: string | number | null;
+  referenceId?: string | number | null;
+  imageUrl?: string | null;
+  documentId?: number | null;
+  prescriptionId?: number | null;
+}): boolean {
+  if (!med) return false;
+  const source = String(med.source || "").toLowerCase().trim();
+  const vStatus = String(med.verification_status || med.verificationStatus || "").toLowerCase().trim();
+  const refId = String(med.reference_id || med.referenceId || "").trim();
+
+  // Explicit manual source or self-reporting
+  if (
+    source.includes("manual") ||
+    source.includes("patient") ||
+    source.includes("self") ||
+    source.includes("onboarding") ||
+    source.includes("user")
+  ) {
+    return true;
+  }
+
+  if (
+    vStatus.includes("patient") ||
+    vStatus.includes("self") ||
+    vStatus.includes("unverified") ||
+    vStatus.includes("reported")
+  ) {
+    return true;
+  }
+
+  // Self-generated MED-xxx or missing reference ID without verified document/prescription
+  if (refId.startsWith("MED-") || refId === "" || !refId) {
+    if (med.documentId || med.prescriptionId) return false;
+    if (med.imageUrl && !med.imageUrl.includes("sample_prescription.png")) return false;
+    return true;
+  }
+
+  // Explicitly confirmed from a prescription scan
+  if (
+    source === "prescription scan" ||
+    vStatus === "prescription verified" ||
+    vStatus === "hospital verified" ||
+    refId.startsWith("RX-") ||
+    refId.startsWith("HMS-") ||
+    refId.startsWith("CP-") ||
+    refId.startsWith("EXTRACTION-")
+  ) {
+    return false;
+  }
+
+  // If no document, prescription, or scan image, treat as manual
+  if (!med.imageUrl || med.imageUrl.includes("sample_prescription.png")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Normalizes medication name by stripping dosage forms, salts, and non-drug tokens.
  * Generic across all drug classes.
  */

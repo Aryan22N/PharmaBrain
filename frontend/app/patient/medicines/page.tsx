@@ -28,8 +28,10 @@ import {
   ZoomIn,
   ShieldAlert,
   ArrowRight,
+  User,
 } from "lucide-react";
 import { usePatientDashboard } from "@/app/patient/context";
+import { isManualMedication } from "@/lib/medicationLifecycle";
 
 type MainTab = "CURRENT" | "HISTORY" | "NEEDS_REVIEW";
 
@@ -708,6 +710,7 @@ export default function MedicinesPage() {
             const isDiscontinued = med.status === "DISCONTINUED";
             const isOnHold = med.status === "ON_HOLD";
             const isNeedsReview = med.status === "NEEDS_REVIEW";
+            const isManual = isManualMedication(med);
 
             return (
               <div
@@ -723,7 +726,7 @@ export default function MedicinesPage() {
                 }`}
               >
                 <div className="space-y-4">
-                  {/* Top Header Row: Drug Name, Strength & Status Badge */}
+                  {/* Top Header Row: Drug Name, Strength, Entry Source & Status Badge */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -733,6 +736,24 @@ export default function MedicinesPage() {
                         {med.strength && (
                           <span className="bg-teal-50 text-teal-800 border border-teal-200 font-bold text-xs px-2.5 py-0.5 rounded-lg font-mono">
                             {med.strength}
+                          </span>
+                        )}
+                        {/* Entry Type Separation Badge */}
+                        {isManual ? (
+                          <span
+                            className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-300 font-bold text-[10px] px-2 py-0.5 rounded-md shadow-2xs"
+                            title="Manually entered medication (patient self-reported / direct log)"
+                          >
+                            <User className="w-3 h-3 text-amber-600" />
+                            Manual Entry
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 border border-teal-200 font-bold text-[10px] px-2 py-0.5 rounded-md shadow-2xs"
+                            title="Verified from physical prescription document scan"
+                          >
+                            <ShieldCheck className="w-3 h-3 text-teal-600" />
+                            Rx Scan Verified
                           </span>
                         )}
                       </div>
@@ -854,13 +875,14 @@ export default function MedicinesPage() {
                     <div className="flex items-center gap-1.5">
                       <Stethoscope className="w-3.5 h-3.5 text-teal-600" />
                       <span className="font-semibold text-slate-800">
-                        {med.doctor || "Attending Physician"}
+                        {med.doctor || (isManual ? "Patient Self-Logged" : "Attending Physician")}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-3 text-[11px] text-slate-500">
                       <span>
-                        Rx Date: <strong>{med.prescriptionDate || med.startDate || "Encounter Date"}</strong>
+                        {isManual ? "Logged: " : "Rx Date: "}
+                        <strong>{med.prescriptionDate || med.startDate || "Encounter Date"}</strong>
                       </span>
                       {med.referenceId && (
                         <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
@@ -905,7 +927,7 @@ export default function MedicinesPage() {
                     className="flex items-center gap-1 text-slate-600 hover:text-teal-700 text-xs font-bold transition-colors cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    <span>Inspect Prescription</span>
+                    <span>{isManual ? "Inspect Record" : "Inspect Prescription"}</span>
                   </button>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -1509,59 +1531,79 @@ export default function MedicinesPage() {
 
             <div className="space-y-4 overflow-y-auto pr-1 text-xs text-slate-700">
               {/* Original Prescription Image Display Card */}
-              <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm space-y-0">
-                <div className="p-2.5 bg-slate-950 flex items-center justify-between border-b border-slate-800">
-                  <div className="flex items-center gap-1.5 text-slate-300 text-[11px] font-bold">
-                    <Eye className="w-3.5 h-3.5 text-teal-400" />
-                    <span>Original Prescription Document Scan</span>
+              {inspectModal.med.imageUrl ? (
+                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm space-y-0">
+                  <div className="p-2.5 bg-slate-950 flex items-center justify-between border-b border-slate-800">
+                    <div className="flex items-center gap-1.5 text-slate-300 text-[11px] font-bold">
+                      <Eye className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Original Prescription Document Scan</span>
+                    </div>
+                    <a
+                      href={inspectModal.med.imageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+                      title="Open prescription scan in new tab"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Open High-Res Scan</span>
+                    </a>
                   </div>
-                  <a
-                    href={inspectModal.med.imageUrl || "/sample_prescription.png"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-md transition-colors cursor-pointer"
-                    title="Open prescription scan in new tab"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    <span>Open High-Res Scan</span>
-                  </a>
-                </div>
 
-                {/* Clickable Image Viewport */}
-                <div
-                  className="relative group bg-slate-950/90 min-h-56 max-h-72 flex items-center justify-center p-2 cursor-pointer overflow-hidden"
-                  onClick={() =>
-                    window.open(
-                      inspectModal.med.imageUrl || "/sample_prescription.png",
-                      "_blank"
-                    )
-                  }
-                  title="Click to view full original prescription in new tab"
-                >
-                  <img
-                    src={inspectModal.med.imageUrl || "/sample_prescription.png"}
-                    alt={`Original prescription for ${inspectModal.med.name}`}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/sample_prescription.png";
-                    }}
-                    className="max-h-68 w-auto max-w-full object-contain rounded transition-transform duration-300 group-hover:scale-[1.02]"
-                  />
-                  {/* Hover Overlay Hint */}
-                  <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-                    <span className="bg-slate-900/90 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-lg border border-slate-700">
-                      <ZoomIn className="w-4 h-4 text-teal-400" />
-                      Click to View Full Prescription
+                  {/* Clickable Image Viewport */}
+                  <div
+                    className="relative group bg-slate-950/90 min-h-56 max-h-72 flex items-center justify-center p-2 cursor-pointer overflow-hidden"
+                    onClick={() =>
+                      window.open(
+                        inspectModal.med.imageUrl || "/sample_prescription.png",
+                        "_blank"
+                      )
+                    }
+                    title="Click to view full original prescription in new tab"
+                  >
+                    <img
+                      src={inspectModal.med.imageUrl}
+                      alt={`Original prescription for ${inspectModal.med.name}`}
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        if (!img.src.includes("sample_prescription.png")) {
+                          img.src = "/sample_prescription.png";
+                        }
+                      }}
+                      className="max-h-68 w-auto max-w-full object-contain rounded transition-transform duration-300 group-hover:scale-[1.02]"
+                    />
+                    {/* Hover Overlay Hint */}
+                    <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                      <span className="bg-slate-900/90 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-lg border border-slate-700">
+                        <ZoomIn className="w-4 h-4 text-teal-400" />
+                        Click to View Full Prescription
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="px-3 py-1.5 bg-slate-950/95 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>Click image to inspect clinician handwriting & physical stamps</span>
+                    <span className="text-teal-400 font-mono">
+                      {inspectModal.med.referenceId || "Confirmed Prescription"}
                     </span>
                   </div>
                 </div>
-
-                <div className="px-3 py-1.5 bg-slate-950/95 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>Click image to inspect clinician handwriting & physical stamps</span>
-                  <span className="text-teal-400 font-mono">
-                    {inspectModal.med.referenceId || "Confirmed Prescription"}
-                  </span>
+              ) : (
+                <div className="bg-slate-900 rounded-xl border border-slate-800 p-6 flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-teal-400">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">Manual / Self-Reported Medicine Record</h4>
+                    <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                      This medicine was self-reported or added directly without an uploaded paper prescription scan.
+                    </p>
+                  </div>
+                  <div className="text-[11px] font-mono text-teal-400 bg-slate-950/80 px-2.5 py-1 rounded border border-slate-800">
+                    Reference: {inspectModal.med.referenceId || "Direct Clinical Record"}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Document Metadata Table */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
@@ -1592,7 +1634,7 @@ export default function MedicinesPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Document Status:</span>
                   <span className="font-semibold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                    Confirmed Prescription
+                    {inspectModal.med.imageUrl ? "Confirmed Prescription" : "Self-Reported / Manually Logged"}
                   </span>
                 </div>
               </div>

@@ -29,6 +29,7 @@ import {
   MapPin,
   Mail,
   ChevronRight,
+  User,
 } from "lucide-react";
 import { LongitudinalTrendsDashboard } from "@/components/trends/LongitudinalTrendsDashboard";
 import {
@@ -36,6 +37,7 @@ import {
   getConditionDescription,
   getAllergyDescription,
 } from "@/lib/medicalDescriptions";
+import { isManualMedication } from "@/lib/medicationLifecycle";
 
 interface MedicationItem {
   id: number;
@@ -1681,9 +1683,28 @@ export default function DoctorPatientRecordPage() {
                           >
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs font-bold text-[#0F172A] group-hover:text-[#2F7D78] transition-colors truncate">
-                                  {m.name}
-                                </span>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-xs font-bold text-[#0F172A] group-hover:text-[#2F7D78] transition-colors truncate">
+                                    {m.name}
+                                  </span>
+                                  {isManualMedication(m) ? (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-300 shrink-0"
+                                      title="Patient self-reported / manually entered"
+                                    >
+                                      <User className="w-2.5 h-2.5 text-amber-600" />
+                                      Manual
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF] shrink-0"
+                                      title="Extracted and confirmed from prescription scan"
+                                    >
+                                      <ShieldCheck className="w-2.5 h-2.5 text-[#2F7D78]" />
+                                      Rx Scan
+                                    </span>
+                                  )}
+                                </div>
                                 {m.frequency ? (
                                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#E8F6F4] text-[#2F7D78] font-bold font-mono shrink-0">
                                     {m.frequency}
@@ -1698,7 +1719,11 @@ export default function DoctorPatientRecordPage() {
                                 {m.strength || ""} {m.route ? `• ${m.route}` : ""}
                               </div>
                               <div className="flex items-center gap-1.5 text-[10px] text-[#94A3B8] mt-1 font-mono truncate">
-                                <span>Prescriber: {formatDoctorName(m.doctor)}</span>
+                                <span>
+                                  {isManualMedication(m)
+                                    ? "Source: Patient Manual Entry"
+                                    : `Prescriber: ${formatDoctorName(m.doctor)}`}
+                                </span>
                               </div>
                             </div>
                             <div className="p-1 text-[#94A3B8] group-hover:text-[#2F7D78] transition-colors shrink-0 self-center">
@@ -2508,11 +2533,28 @@ export default function DoctorPatientRecordPage() {
                     title="Click to view full medication pharmacology, indications, and description"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-bold text-[#0F172A] group-hover:text-[#2F7D78] transition-colors">{m.name}</span>
                         {m.strength && (
                           <span className="text-[11px] font-mono text-[#64748B] bg-white px-2 py-0.5 rounded border border-[#DCE4ED]">
                             {m.strength}
+                          </span>
+                        )}
+                        {isManualMedication(m) ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300"
+                            title="Patient self-reported / manual entry"
+                          >
+                            <User className="w-2.5 h-2.5 text-amber-600" />
+                            Manual Entry
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF]"
+                            title="Prescription scan verified"
+                          >
+                            <ShieldCheck className="w-2.5 h-2.5 text-[#2F7D78]" />
+                            Rx Scan Verified
                           </span>
                         )}
                       </div>
@@ -2850,6 +2892,17 @@ export default function DoctorPatientRecordPage() {
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78]">
                         {med.status || "Active"}
                       </span>
+                      {isManualMedication(med) ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                          <User className="w-3 h-3 text-amber-600" />
+                          Manual / Self-Reported Entry
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-[#E8F6F4] text-[#2F7D78] border border-[#A7E9DF]">
+                          <ShieldCheck className="w-3 h-3 text-[#2F7D78]" />
+                          Rx Scan Verified
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-[#64748B] mt-0.5">
                       Pharmacological Classification & Regimen Profile
@@ -2912,6 +2965,12 @@ export default function DoctorPatientRecordPage() {
                       <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block truncate">{formatHospitalName(med.hospital)}</span>
                     </div>
                   )}
+                  <div className="p-2.5 rounded-xl bg-white border border-[#DCE4ED]">
+                    <span className="text-[10px] uppercase font-bold text-[#94A3B8] block">Record Provenance</span>
+                    <span className="text-xs font-semibold text-[#0F172A] mt-0.5 block">
+                      {isManualMedication(med) ? "Patient Manual Entry (Self-Reported)" : "Prescription Document Scan (Verified)"}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] space-y-1">
