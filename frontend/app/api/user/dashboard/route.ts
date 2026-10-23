@@ -3,6 +3,7 @@ import { generate9DigitPatientId } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { requirePatientSession } from '@/lib/serverAuth';
 import { mergeTimelineEvents } from '@/lib/prescriptionTimeline';
+import { ensurePatientConditionsTable, syncConditionsFromProfile } from '@/lib/patientConditions';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,9 +40,38 @@ export async function GET(request: Request) {
       [user.id, patientIds]
     );
 
-    // 2. Fetch Patient Conditions from DB table
+    // 2. Fetch Patient Conditions from DB table with auto-sync from onboarding
     let conditions: any[] = [];
     try {
+      await ensurePatientConditionsTable();
+
+      // Check if patient_onboarding or patient_demographics has conditions that need syncing
+      const onbRows = await query(
+        `SELECT conditions, custom_conditions FROM patient_onboarding WHERE user_id = $1 LIMIT 1;`,
+        [user.id]
+      );
+      if (onbRows.length > 0 && (onbRows[0].conditions || onbRows[0].custom_conditions)) {
+        await syncConditionsFromProfile({
+          patientId: patientIds[0] || user.patientId || String(user.id),
+          userId: user.id,
+          conditions: onbRows[0].conditions,
+          customConditions: onbRows[0].custom_conditions,
+        });
+      } else {
+        const demoRows = await query(
+          `SELECT conditions, custom_conditions FROM patient_demographics WHERE user_id = $1 LIMIT 1;`,
+          [user.id]
+        );
+        if (demoRows.length > 0 && (demoRows[0].conditions || demoRows[0].custom_conditions)) {
+          await syncConditionsFromProfile({
+            patientId: patientIds[0] || user.patientId || String(user.id),
+            userId: user.id,
+            conditions: demoRows[0].conditions,
+            customConditions: demoRows[0].custom_conditions,
+          });
+        }
+      }
+
       conditions = await query(
         `SELECT id, condition_name, icd10_code, category, status, diagnosed_date, severity, doctor, facility, notes
          FROM patient_conditions

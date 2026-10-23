@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requirePatientSession } from "@/lib/serverAuth";
+import { syncConditionsFromProfile } from "@/lib/patientConditions";
 
 export const dynamic = "force-dynamic";
 
@@ -153,18 +154,16 @@ export async function POST(req: NextRequest) {
       console.warn("Failed to sync patient_demographics from onboarding:", demoSyncErr);
     }
 
-    // 4. Optionally insert recorded medicines/conditions into patient_medications if chronic
-    if (conditions?.hasDiabetes) {
-      try {
-        await query(
-          `INSERT INTO patient_medications (patient_id, user_id, name, strength, status, indication, frequency, route, start_date, doctor, source, reliability, verification_status)
-           VALUES ($1, $2, 'Metformin', '500 mg', 'ACTIVE', 'Type 2 Diabetes Mellitus', '1-0-1', 'Oral', $3, 'Attending Physician', 'Patient Entry', 'Medium', 'Patient Confirmed')
-           ON CONFLICT DO NOTHING;`,
-          [patientId, userId, `${conditions.diabetesYear || '2021'}-01-01`]
-        );
-      } catch (e) {
-        console.warn("Diabetes med insertion warning:", e);
-      }
+    // 4. Synchronize diagnosed conditions into patient_conditions & starter medications
+    try {
+      await syncConditionsFromProfile({
+        patientId,
+        userId,
+        conditions,
+        customConditions,
+      });
+    } catch (syncErr) {
+      console.warn("Conditions sync from onboarding warning:", syncErr);
     }
 
     return NextResponse.json({

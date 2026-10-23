@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requirePatientSession } from "@/lib/serverAuth";
+import { syncConditionsFromProfile } from "@/lib/patientConditions";
 
 export const dynamic = "force-dynamic";
 
@@ -349,6 +350,18 @@ export async function PUT(req: NextRequest) {
       );
     } catch (onbSyncErr) {
       console.warn("Sync to patient_onboarding warning:", onbSyncErr);
+    }
+
+    // Keep patient_conditions in sync with updated medical history & conditions
+    try {
+      await syncConditionsFromProfile({
+        patientId,
+        userId,
+        conditions,
+        customConditions,
+      });
+    } catch (condSyncErr) {
+      console.warn("Sync to patient_conditions warning:", condSyncErr);
     }
 
     return NextResponse.json({ success: true, message: "Profile saved successfully." });

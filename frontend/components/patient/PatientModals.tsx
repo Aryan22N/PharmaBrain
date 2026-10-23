@@ -42,6 +42,7 @@ export function PatientModals() {
     newAllergy,
     setNewAllergy,
     handleAddAllergy,
+    conditions,
     addConditionModalOpen,
     setAddConditionModalOpen,
     submittingCondition,
@@ -790,8 +791,8 @@ export function PatientModals() {
                   <HeartPulse className="w-4 h-4 stroke-[2.5]" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">Add Clinical Condition</h3>
-                  <p className="text-[11px] text-slate-500">Record a confirmed diagnosis or chronic condition</p>
+                  <h3 className="text-sm font-bold text-slate-900">Clinical Conditions</h3>
+                  <p className="text-[11px] text-slate-500">View active conditions and record confirmed diagnoses</p>
                 </div>
               </div>
               <button
@@ -802,7 +803,40 @@ export function PatientModals() {
               </button>
             </div>
 
+            {/* List of currently recorded active conditions */}
+            {conditions && conditions.length > 0 && (
+              <div className="space-y-2 border-b border-slate-100 pb-3 max-h-44 overflow-y-auto">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Active Recorded Conditions ({conditions.length})
+                </span>
+                <div className="space-y-1.5">
+                  {conditions.map((c: any, idx: number) => (
+                    <div
+                      key={c.id || idx}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-teal-500 shrink-0" />
+                        <div>
+                          <span className="font-semibold text-slate-900 block">{c.condition_name}</span>
+                          <span className="text-[10.5px] text-slate-500">
+                            {c.category || "Chronic"} {c.diagnosed_date ? `• Diagnosed ${c.diagnosed_date}` : ""}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        {c.status || "ACTIVE"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleAddCondition} className="space-y-3.5">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                {conditions && conditions.length > 0 ? "Add Another Condition" : "Record New Condition"}
+              </span>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">
