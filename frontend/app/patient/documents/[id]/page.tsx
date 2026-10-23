@@ -38,6 +38,64 @@ import {
   Trash2,
 } from "lucide-react";
 
+/** Normalize name string into individual tokens excluding common titles/honorifics */
+function normalizeNameTokens(name: string): string[] {
+  if (!name) return [];
+  const clean = name
+    .toLowerCase()
+    .replace(/\b(mr|mrs|ms|miss|dr|master|baby|smt|shri|pt|patient|s\/o|d\/o|w\/o)\.?\b/gi, "")
+    .replace(/[^a-z0-9\s]/gi, " ")
+    .trim();
+  return clean.split(/\s+/).filter(Boolean);
+}
+
+/** Returns true if there is a substantive name mismatch between registered username and OCR extracted name */
+function checkPatientNameMismatch(registeredName: string, extractedName: string): boolean {
+  if (!registeredName || !extractedName) return false;
+
+  const genericWords = new Set(["patient", "record", "unknown", "na", "null", "none", "unspecified"]);
+  const regTokens = normalizeNameTokens(registeredName);
+  const extTokens = normalizeNameTokens(extractedName);
+
+  if (regTokens.length === 0 || extTokens.length === 0) return false;
+  if (extTokens.every((t) => genericWords.has(t))) return false;
+
+  const regSet = new Set(regTokens);
+  const extSet = new Set(extTokens);
+  const allRegInExt = regTokens.every((t) => extSet.has(t));
+  const allExtInReg = extTokens.every((t) => regSet.has(t));
+  if (allRegInExt || allExtInReg) {
+    return false;
+  }
+
+  // If both have at least first and last name
+  if (regTokens.length >= 2 && extTokens.length >= 2) {
+    const regFirst = regTokens[0];
+    const regLast = regTokens[regTokens.length - 1];
+
+    const extFirst = extTokens[0];
+    const extLast = extTokens[extTokens.length - 1];
+
+    const normalMatch = regFirst === extFirst && regLast === extLast;
+    const reverseMatch = regFirst === extLast && regLast === extFirst;
+
+    if (normalMatch || reverseMatch) {
+      return false;
+    }
+    return true;
+  }
+
+  if (regTokens.length === 1) {
+    return !extSet.has(regTokens[0]);
+  }
+
+  if (extTokens.length === 1) {
+    return !regSet.has(extTokens[0]);
+  }
+
+  return true;
+}
+
 export default function PatientDocumentDetailPage({
   params,
 }: {
@@ -45,7 +103,7 @@ export default function PatientDocumentDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { refresh } = usePatientDashboard();
+  const { refresh, userData } = usePatientDashboard();
 
   const [payload, setPayload] = useState<ExtractionPayload | null>(null);
   const [record, setRecord] = useState<PrescriptionRecord | null>(null);
@@ -247,6 +305,32 @@ export default function PatientDocumentDetailPage({
   const isPending = payload.status === "PENDING_USER_CONFIRMATION";
   const patientId = record.patient?.uhid?.trim() || payload.patient_id || "";
 
+  const registeredUserName = (
+    userData?.name ||
+    (typeof window !== "undefined"
+      ? (() => {
+          try {
+            return JSON.parse(localStorage.getItem("user") || "{}")?.name || "";
+          } catch {
+            return "";
+          }
+        })()
+      : "") ||
+    ""
+  ).trim();
+
+  const extractedPatientName = (
+    record.patient?.name ||
+    payload.record?.patient?.name ||
+    ""
+  ).trim();
+
+  const isNameMismatch = Boolean(
+    registeredUserName &&
+    extractedPatientName &&
+    checkPatientNameMismatch(registeredUserName, extractedPatientName)
+  );
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -415,6 +499,33 @@ export default function PatientDocumentDetailPage({
         </div>
       )}
 
+      {/* Patient Name Mismatch Warning Banner */}
+      {isNameMismatch && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-amber-50/95 border border-amber-300 text-amber-900 shadow-xs space-y-2.5 animate-in fade-in duration-150">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle className="w-5 h-5 stroke-[2.2]" />
+            </div>
+            <div className="flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-bold text-amber-950">
+                  Patient Name Mismatch Warning
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300 uppercase">
+                  Name Verification Alert
+                </span>
+              </div>
+              <p className="text-xs text-amber-900 leading-relaxed">
+                The patient name extracted by OCR (<strong className="text-amber-950 font-extrabold">&ldquo;{extractedPatientName}&rdquo;</strong>) does not match your registered username (<strong className="text-amber-950 font-extrabold">&ldquo;{registeredUserName}&rdquo;</strong>).
+              </p>
+              <p className="text-[11.5px] text-amber-800">
+                Please verify that this prescription belongs to you before proceeding.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SUMMARY TAB */}
       {activeTab === "summary" && (
         <div className="space-y-6">
@@ -427,9 +538,20 @@ export default function PatientDocumentDetailPage({
                   <User className="w-3.5 h-3.5" />
                   Patient Profile
                 </div>
-                <div className="text-sm font-bold text-slate-900">
-                  {record.patient?.name || "Patient Record"}
+                <div className="text-sm font-bold text-slate-900 flex flex-wrap items-center gap-2">
+                  <span>{record.patient?.name || "Patient Record"}</span>
+                  {isNameMismatch && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+                      <AlertTriangle className="w-3 h-3 text-amber-600" />
+                      Name Mismatch
+                    </span>
+                  )}
                 </div>
+                {isNameMismatch && (
+                  <div className="text-[11px] text-amber-800 bg-amber-50/80 p-2 rounded-lg border border-amber-200">
+                    Registered User: <strong className="text-amber-950">{registeredUserName}</strong>
+                  </div>
+                )}
                 {patientId && (
                   <div className="text-xs text-slate-500 font-mono">
                     UHID: <strong className="text-teal-700">{patientId}</strong>
@@ -494,9 +616,16 @@ export default function PatientDocumentDetailPage({
                   <span className="text-xs font-bold text-slate-900 block">
                     Prescription Ready for Confirmation
                   </span>
-                  <span className="text-[11px] text-slate-500">
-                    Verify medications and click confirm to save to your clinical timeline.
-                  </span>
+                  {isNameMismatch ? (
+                    <span className="text-[11px] text-amber-700 font-semibold flex items-center gap-1 mt-0.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 inline shrink-0" />
+                      Notice: Extracted name (&ldquo;{extractedPatientName}&rdquo;) does not match registered username (&ldquo;{registeredUserName}&rdquo;).
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-500">
+                      Verify medications and click confirm to save to your clinical timeline.
+                    </span>
+                  )}
                 </div>
               </div>
 
